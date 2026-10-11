@@ -218,3 +218,22 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Project Specific Custom Rules ---
+
+# Environment variables & secrets
+.env.local
+.env.*.local
+
+# Vector DB & Storage (ChromaDB / Vector Store)
+chroma_db/
+vector_store/
+*.index
+
+# IDE / Editor settings
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db
