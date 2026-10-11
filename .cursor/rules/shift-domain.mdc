@@ -1,0 +1,27 @@
+---
+description: Domain invariants for Smart Shift Manager commands, events, and the evaluation agent
+alwaysApply: true
+---
+
+# Shift domain invariants
+
+Follow [docs/requirements.md](docs/requirements.md) and [docs/architecture.md](docs/architecture.md).
+
+- Append events. Do not update or delete rows in `events`.
+- Command handlers do not write read models. Projectors do.
+- Screen queries do not read `events`.
+- `agent_worker` may append only `AgentEvaluationCompleted`.
+- Reject overlaps, rest under 8 hours, `unavailable`, and role mismatches.
+- Weekly hours above 42 are a warning, not an automatic rejection.
+- Take `employee_id` from the session on employee commands.
+- Keep the database connection string and MCP secrets in environment variables.
+- User-facing copy is English.
+
+```python
+# Bad: the command updates the board in place
+shift.assigned_count += 1
+db.session.commit()
+
+# Good: the command appends one event; the projector updates the board
+append_event(aggregate_id, "AssignmentApproved", payload)
+```
