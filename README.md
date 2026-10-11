@@ -20,4 +20,44 @@ This project is designed and developed following the **Specification-Driven Appl
 
 ## 🏗️ Architecture Overview
 
-The system follows a modern event-driven architecture using Flask, CQRS, and Event Sourcing:
+The system follows a modern event-driven architecture using Flask, CQRS, and Event Sourcing. The Flask application serves the screens and accepts commands and queries through separate Blueprints. Commands append immutable events to SQL Server on Somee. Projectors build read models from that log, and screens read those models only. A separate vector store holds embeddings of employee profiles and labor-agreement clauses. A background agent process evaluates pending shift requests with that retrieval and with MCP tools, then writes a recommendation event. The manager makes the final decision.
+
+- [Requirements](docs/requirements.md)
+- [Architecture](docs/architecture.md)
+- [Skills and rules](docs/skills_and_rules.md)
+
+---
+
+## Run
+
+Requires Python 3.9 or newer.
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+Set the environment variables in the same shell before starting either process:
+
+```powershell
+$env:SECRET_KEY = "replace-with-a-session-secret"
+$env:SOMEE_SQLSERVER_CONNECTION_STRING = "mssql+pyodbc://USER:PASSWORD@HOST/DB?driver=ODBC+Driver+18+for+SQL+Server"
+$env:MCP_TAVILY_API_KEY = "replace-with-the-tavily-key"
+$env:MCP_GMAIL_CREDENTIALS = "replace-with-the-gmail-mcp-credentials"
+```
+
+Start the Flask app:
+
+```powershell
+$env:FLASK_APP = "app"
+flask run
+```
+
+The app listens on http://127.0.0.1:5000. In a second terminal, with the virtual environment activated and the same variables set, start the agent:
+
+```powershell
+python agent_worker.py
+```
+
+`agent_worker.py` runs outside the HTTP server on a 30-second cycle. This skeleton starts both processes. Shift commands, read models, retrieval, and MCP calls are specified in the architecture document and are not implemented yet. The web process still starts when the database and MCP variables are empty. The worker stays idle until `SOMEE_SQLSERVER_CONNECTION_STRING` is set.

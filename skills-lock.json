@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "skills": {
+    "flask": {
+      "source": "jezweb/claude-skills",
+      "ref": "v1-final",
+      "sourceType": "github",
+      "skillPath": "skills/flask/SKILL.md",
+      "computedHash": "e4ad32d87fe209aaad49c6ea2920de74704f734df3ed472c010f7bbe8228a94b"
+    }
+  }
+}
