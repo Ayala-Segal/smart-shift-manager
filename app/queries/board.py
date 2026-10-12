@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 from app.auth.models import ROLE_EMPLOYEE
 from app.extensions import db
-from app.read_models import ShiftBoardRow, ShiftRequestRow
+from app.read_models import RequestRecommendationRow, ShiftBoardRow, ShiftRequestRow
 
 OPEN_STATUSES = ("open", "partial")
 
@@ -53,6 +53,15 @@ def requests_for_shift(shift_id):
     )
 
 
+def recommendations_for(shift_id):
+    rows = (
+        db.session.query(RequestRecommendationRow)
+        .filter(RequestRecommendationRow.shift_id == shift_id)
+        .all()
+    )
+    return {row.request_id: row for row in rows}
+
+
 def shift_board_payload(rows):
     payload = {
         "shifts": [_shift_summary(row) for row in rows],
@@ -62,7 +71,8 @@ def shift_board_payload(rows):
     return payload
 
 
-def shift_detail_payload(row, requests, viewer):
+def shift_detail_payload(row, requests, viewer, recommendations=None):
+    recommendations = recommendations or {}
     visible = []
     for item in requests:
         entry = {
@@ -82,8 +92,19 @@ def shift_detail_payload(row, requests, viewer):
             if item.replacement_employee_id:
                 entry["replacement_employee_id"] = item.replacement_employee_id
                 entry["replacement_name"] = item.replacement_name
+        recommendation = recommendations.get(item.request_id)
+        if recommendation and _can_see_recommendation(viewer, item):
+            entry["recommendation"] = recommendation.decision
+            entry["rationale"] = recommendation.rationale
+            entry["hours_warning"] = recommendation.hours_warning
         visible.append(entry)
     return {"shift": _shift_summary(row), "registered": visible}
+
+
+def _can_see_recommendation(viewer, request_row):
+    if viewer.role != ROLE_EMPLOYEE:
+        return True
+    return request_row.employee_id == viewer.user_id
 
 
 def _shift_summary(row):
