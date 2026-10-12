@@ -61,6 +61,18 @@ def register_cli(app):
         processed = project_shift_board()
         click.echo("projected {0} events".format(processed))
 
+    @app.cli.command("index-policies")
+    def index_policies():
+        """Embed labor-agreement clauses in the vector store."""
+        from app.retrieval.service import ensure_agreement_indexed
+        from app.retrieval.store import RetrievalUnavailable
+
+        try:
+            stored = ensure_agreement_indexed(app.config["VECTOR_STORE_PATH"], force=True)
+        except RetrievalUnavailable as error:
+            raise click.ClickException(str(error)) from error
+        click.echo("indexed {0} policy paragraphs".format(stored))
+
     @app.cli.command("show-board")
     def show_board_command():
         """Print the shift board from the read model."""

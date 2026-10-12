@@ -1,11 +1,13 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user
 
 from app.auth.guards import role_required
-from app.auth.models import ROLE_EMPLOYEE
+from app.auth.models import ROLE_EMPLOYEE, ROLE_MANAGER
 from app.commands.define_shift import CommandRejected
 from app.commands.submit_requests import request_assignment, request_swap, submit_availability
 from app.projections import project_shift_board
+from app.retrieval.service import ProfileRejected, save_employee_profile
+from app.retrieval.store import RetrievalUnavailable
 
 commands_bp = Blueprint("commands", __name__)
 WAITING = "Waiting for agent evaluation"
@@ -60,6 +62,28 @@ def swaps():
             note=body.get("note") or "",
         )
     )
+
+
+@commands_bp.post("/profiles")
+@role_required(ROLE_MANAGER)
+def profiles():
+    body = request.get_json(silent=True) or {}
+    try:
+        saved = save_employee_profile(
+            store_path=current_app.config["VECTOR_STORE_PATH"],
+            employee_id=body.get("employee_id"),
+            years_experience=body.get("years_experience"),
+            skills=body.get("skills"),
+            shift_types=body.get("shift_types") or "",
+            preferences=body.get("preferences") or "",
+            limitations=body.get("limitations") or "",
+            manager_notes=body.get("manager_notes") or "",
+        )
+    except ProfileRejected as error:
+        return jsonify({"error": str(error)}), 400
+    except RetrievalUnavailable:
+        return jsonify({"error": "Semantic search is unavailable."}), 503
+    return jsonify(saved), 201
 
 
 def _submit(command):

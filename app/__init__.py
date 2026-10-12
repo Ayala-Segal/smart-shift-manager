@@ -29,6 +29,7 @@ def create_app():
         }
     app.config["MCP_TAVILY_API_KEY"] = os.environ.get("MCP_TAVILY_API_KEY", "")
     app.config["MCP_GMAIL_CREDENTIALS"] = os.environ.get("MCP_GMAIL_CREDENTIALS", "")
+    app.config["VECTOR_STORE_PATH"] = os.environ.get("VECTOR_STORE_PATH", "instance/chroma")
 
     db.init_app(app)
     login_manager.init_app(app)
