@@ -2,9 +2,10 @@ import os
 from uuid import uuid4
 
 import click
-from flask import Flask
+from flask import Flask, jsonify
+from sqlalchemy.pool import StaticPool
 
-from app.extensions import db
+from app.extensions import db, login_manager
 from app.event_store import (
     AGGREGATE_SHIFT,
     SHIFT_DEFINED,
@@ -18,14 +19,23 @@ def create_app():
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-only-change-me")
     somee_connection = os.environ.get("SOMEE_SQLSERVER_CONNECTION_STRING", "")
     app.config["SOMEE_SQLSERVER_CONNECTION_STRING"] = somee_connection
-    app.config["SQLALCHEMY_DATABASE_URI"] = (
-        sqlalchemy_uri_from_somee(somee_connection) or "sqlite://"
-    )
+    database_uri = sqlalchemy_uri_from_somee(somee_connection) or "sqlite://"
+    app.config["SQLALCHEMY_DATABASE_URI"] = database_uri
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    if database_uri == "sqlite://":
+        app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+            "connect_args": {"check_same_thread": False},
+            "poolclass": StaticPool,
+        }
     app.config["MCP_TAVILY_API_KEY"] = os.environ.get("MCP_TAVILY_API_KEY", "")
     app.config["MCP_GMAIL_CREDENTIALS"] = os.environ.get("MCP_GMAIL_CREDENTIALS", "")
 
     db.init_app(app)
+    login_manager.init_app(app)
+
+    @login_manager.unauthorized_handler
+    def unauthorized():
+        return jsonify({"error": "Sign-in required."}), 401
 
     from app.cli import register_cli
     from app.auth import auth_bp
