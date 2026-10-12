@@ -2,19 +2,24 @@ import json
 from datetime import date
 
 from app.event_store import (
+    ASSIGNMENT_APPROVED,
     ASSIGNMENT_REQUESTED,
     AVAILABILITY_CONSTRAINT_SUBMITTED,
+    SHIFT_CANCELLED,
     SHIFT_DEFINED,
     SWAP_REQUESTED,
     Event,
 )
 from app.extensions import db
 from app.read_models import (
+    ApprovedAssignmentRow,
     AvailabilityConstraintRow,
+    EmployeeHoursRow,
     ProjectorCheckpoint,
     ShiftBoardRow,
     ShiftRequestRow,
 )
+from app.tools.schedule import duration_hours, week_start_sunday
 
 SHIFT_BOARD_PROJECTOR = "shift_board"
 
@@ -24,6 +29,8 @@ def ensure_read_models():
     ProjectorCheckpoint.__table__.create(db.engine, checkfirst=True)
     ShiftRequestRow.__table__.create(db.engine, checkfirst=True)
     AvailabilityConstraintRow.__table__.create(db.engine, checkfirst=True)
+    EmployeeHoursRow.__table__.create(db.engine, checkfirst=True)
+    ApprovedAssignmentRow.__table__.create(db.engine, checkfirst=True)
 
 
 def project_shift_board():
@@ -46,6 +53,10 @@ def project_shift_board():
             _apply_request(event, "swap")
         elif event.event_type == AVAILABILITY_CONSTRAINT_SUBMITTED:
             _apply_availability(event)
+        elif event.event_type == ASSIGNMENT_APPROVED:
+            _apply_assignment_approved(event)
+        elif event.event_type == SHIFT_CANCELLED:
+            _apply_shift_cancelled(event)
         if checkpoint is None:
             checkpoint = ProjectorCheckpoint(
                 projector_name=SHIFT_BOARD_PROJECTOR,
@@ -111,3 +122,71 @@ def _apply_availability(event):
             note=payload.get("note") or "",
         )
     )
+
+
+def _apply_assignment_approved(event):
+    payload = json.loads(event.payload_json)
+    shift = db.session.get(ShiftBoardRow, payload.get("shift_id"))
+    if shift is not None and shift.status == "cancelled":
+        return
+    shift_date = date.fromisoformat(payload["shift_date"])
+    hours = duration_hours(payload["start_time"], payload["end_time"])
+    row = ApprovedAssignmentRow(
+        assignment_id=event.aggregate_id,
+        employee_id=payload["employee_id"],
+        shift_id=payload["shift_id"],
+        shift_date=shift_date,
+        start_time=payload["start_time"],
+        end_time=payload["end_time"],
+        hours=hours,
+        active=True,
+    )
+    db.session.add(row)
+    _add_hours(payload["employee_id"], week_start_sunday(shift_date), hours)
+    if shift is not None:
+        shift.assigned_count = (shift.assigned_count or 0) + 1
+        _refresh_status(shift)
+
+
+def _apply_shift_cancelled(event):
+    shift = db.session.get(ShiftBoardRow, event.aggregate_id)
+    if shift is not None:
+        shift.status = "cancelled"
+    assignments = (
+        db.session.query(ApprovedAssignmentRow)
+        .filter(ApprovedAssignmentRow.shift_id == event.aggregate_id)
+        .all()
+    )
+    for assignment in assignments:
+        if not assignment.active:
+            continue
+        assignment.active = False
+        _add_hours(
+            assignment.employee_id,
+            week_start_sunday(assignment.shift_date),
+            -assignment.hours,
+        )
+
+
+def _add_hours(employee_id, week_start, hours):
+    row = db.session.get(EmployeeHoursRow, (employee_id, week_start))
+    if row is None:
+        row = EmployeeHoursRow(
+            employee_id=employee_id,
+            week_start=week_start,
+            approved_hours=0,
+        )
+        db.session.add(row)
+    row.approved_hours = round((row.approved_hours or 0) + hours, 2)
+    if row.approved_hours <= 0:
+        db.session.delete(row)
+
+
+def _refresh_status(row):
+    if row.assigned_count <= 0:
+        row.assigned_count = 0
+        row.status = "open"
+    elif row.assigned_count < row.required_headcount:
+        row.status = "partial"
+    else:
+        row.status = "staffed"
