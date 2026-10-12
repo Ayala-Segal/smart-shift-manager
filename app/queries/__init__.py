@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user
 
 from app.auth.guards import role_required
@@ -12,6 +12,8 @@ from app.queries.board import (
     shift_detail_payload,
 )
 from app.read_models import ShiftBoardRow
+from app.retrieval.service import ProfileRejected, describe_shift, match_candidates, passages_for_employee
+from app.retrieval.store import RetrievalUnavailable
 
 queries_bp = Blueprint("queries", __name__)
 
@@ -60,3 +62,58 @@ def shift_detail(shift_id):
     if row is None:
         return jsonify({"error": "The shift does not exist."}), 404
     return shift_detail_payload(row, requests_for_shift(shift_id), current_user)
+
+
+@queries_bp.post("/semantic-match")
+@role_required(ROLE_MANAGER)
+def semantic_match():
+    body = request.get_json(silent=True) or {}
+    try:
+        query_text = _semantic_query(body)
+        matches = match_candidates(current_app.config["VECTOR_STORE_PATH"], query_text)
+    except ProfileRejected as error:
+        return jsonify({"error": str(error)}), 400
+    except RetrievalUnavailable:
+        return jsonify({"error": "Semantic search is unavailable."}), 503
+    return jsonify({"query": query_text, "matches": matches})
+
+
+@queries_bp.get("/semantic-context")
+@role_required(ROLE_MANAGER)
+def semantic_context():
+    query_text = (request.args.get("q") or "").strip()
+    if not query_text:
+        return jsonify({"error": "A search query is required."}), 400
+    try:
+        passages = passages_for_employee(
+            current_app.config["VECTOR_STORE_PATH"],
+            (request.args.get("employee_id") or "").strip(),
+            query_text,
+        )
+    except ProfileRejected as error:
+        return jsonify({"error": str(error)}), 400
+    except RetrievalUnavailable:
+        return jsonify({"error": "Semantic search is unavailable."}), 503
+    return jsonify({"query": query_text, "passages": passages})
+
+
+def _semantic_query(body):
+    shift_id = (body.get("shift_id") or "").strip()
+    if shift_id:
+        row = db.session.get(ShiftBoardRow, shift_id)
+        if row is None:
+            raise ProfileRejected("The shift does not exist.")
+        return describe_shift(
+            required_role=row.required_role,
+            note=row.note,
+            start_time=row.start_time,
+            end_time=row.end_time,
+            shift_date=row.shift_date.isoformat(),
+        )
+    return describe_shift(
+        required_role=body.get("required_role") or "",
+        note=body.get("note") or "",
+        start_time=body.get("start_time") or "",
+        end_time=body.get("end_time") or "",
+        shift_date=body.get("date") or "",
+    )

@@ -45,6 +45,7 @@ $env:SECRET_KEY = "replace-with-a-session-secret"
 $env:SOMEE_SQLSERVER_CONNECTION_STRING = "mssql+pyodbc://USER:PASSWORD@HOST/DB?driver=ODBC+Driver+18+for+SQL+Server"
 $env:MCP_TAVILY_API_KEY = "replace-with-the-tavily-key"
 $env:MCP_GMAIL_CREDENTIALS = "replace-with-the-gmail-mcp-credentials"
+$env:VECTOR_STORE_PATH = "instance/chroma"
 ```
 
 Start the Flask app:
@@ -70,6 +71,8 @@ curl -X POST http://127.0.0.1:5000/auth/login -H "Content-Type: application/json
 A manager is sent to `/queries/manager-dashboard`. An employee is sent to `/queries/my-dashboard`. Wrong credentials, and an inactive account, both return `Sign-in failed.`
 
 Signed-in users can list shifts at `/queries/board` (`mode=week` or `mode=month`, plus `date`, `role`, and `status`) and open one shift at `/queries/shifts/<shift_id>`. An employee submits an availability constraint at `/commands/availability`, an assignment request at `/commands/assignments`, or a swap at `/commands/swaps`. On Somee, also run [db/004_read_shift_requests.sql](db/004_read_shift_requests.sql) once so the board can show those requests.
+
+A manager indexes an employee profile into the Chroma vector store at `/commands/profiles`. The profile text (role, experience, skills, shift types, preferences, limitations, and manager notes) is stored in `embedding_profiles`. The vectors are not stored in SQL Server. On Somee, run [db/005_embedding_profiles.sql](db/005_embedding_profiles.sql) once. `flask index-policies` embeds the labor-agreement clauses. A manager matches candidates to a shift at `/queries/semantic-match` with a `shift_id`, or with `required_role` and `note`. Date-specific availability stays in the event log and is not embedded.
 
 In a second terminal, with the virtual environment activated and the same variables set, start the agent:
 
