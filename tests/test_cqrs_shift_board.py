@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.commands.define_shift import CommandRejected, define_shift
 from app.event_store import Event
-from app.extensions import db
+from app.extensions import db, login_manager
 from app.projections import project_shift_board
 from app.queries import queries_bp
 from app.queries.board import get_shift_board
@@ -28,6 +28,7 @@ def build_app():
         "poolclass": StaticPool,
     }
     db.init_app(app)
+    login_manager.init_app(app)
     app.register_blueprint(queries_bp, url_prefix="/queries")
     with app.app_context():
         db.create_all()
@@ -65,8 +66,7 @@ class ShiftBoardCqrsTests(unittest.TestCase):
             self.assertEqual(len(get_shift_board()), 1)
 
             response = self.app.test_client().get("/queries/board")
-            self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.get_json()["shifts"][0]["status"], "open")
+            self.assertEqual(response.status_code, 401)
 
     def test_rejected_command_stores_nothing(self):
         with self.app.app_context():

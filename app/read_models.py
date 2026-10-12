@@ -22,3 +22,29 @@ class ProjectorCheckpoint(db.Model):
 
     projector_name = db.Column(db.String(64), primary_key=True)
     last_event_id = db.Column(db.BigInteger, nullable=False)
+
+
+class ShiftRequestRow(db.Model):
+    __tablename__ = "read_shift_requests"
+
+    request_id = db.Column(db.String(64), primary_key=True)
+    shift_id = db.Column(db.String(64), nullable=False, index=True)
+    request_type = db.Column(db.String(32), nullable=False)
+    employee_id = db.Column(db.String(64), nullable=False)
+    full_name = db.Column(db.String(120), nullable=False)
+    professional_role = db.Column(db.String(64), nullable=False)
+    status = db.Column(db.String(64), nullable=False)
+    note = db.Column(db.String(300), nullable=False, default="")
+    replacement_employee_id = db.Column(db.String(64), nullable=True)
+    replacement_name = db.Column(db.String(120), nullable=True)
+
+
+class AvailabilityConstraintRow(db.Model):
+    __tablename__ = "read_availability_constraints"
+
+    constraint_id = db.Column(db.String(64), primary_key=True)
+    employee_id = db.Column(db.String(64), nullable=False, index=True)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    constraint_type = db.Column(db.String(32), nullable=False)
+    note = db.Column(db.String(300), nullable=False, default="")
