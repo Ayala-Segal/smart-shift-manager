@@ -7,6 +7,14 @@ from app.queries.board import get_shift_board
 
 
 def register_cli(app):
+    @app.cli.command("init-accounts")
+    def init_accounts():
+        """Create the users table. Accounts are stored outside the event log."""
+        from app.auth.service import ensure_accounts_table
+
+        ensure_accounts_table()
+        click.echo("accounts table is ready")
+
     def require_somee():
         if not app.config["SOMEE_SQLSERVER_CONNECTION_STRING"].strip():
             raise click.ClickException(

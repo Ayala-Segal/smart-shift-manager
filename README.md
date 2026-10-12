@@ -54,10 +54,25 @@ $env:FLASK_APP = "app"
 flask run
 ```
 
-The app listens on http://127.0.0.1:5000. In a second terminal, with the virtual environment activated and the same variables set, start the agent:
+The app listens on http://127.0.0.1:5000. Create the account table once. On Somee, run [db/003_users.sql](db/003_users.sql). Locally, in another terminal:
+
+```powershell
+flask init-accounts
+```
+
+Register and sign in with JSON. `role` is `manager` or `employee`. An employee also sends `professional_role`.
+
+```powershell
+curl -X POST http://127.0.0.1:5000/auth/register -H "Content-Type: application/json" -d "{\"full_name\":\"Ayala Levi\",\"email\":\"ayala@example.com\",\"password\":\"password1\",\"role\":\"employee\",\"professional_role\":\"cashier\"}"
+curl -X POST http://127.0.0.1:5000/auth/login -H "Content-Type: application/json" -c cookies.txt -d "{\"email\":\"ayala@example.com\",\"password\":\"password1\"}"
+```
+
+A manager is sent to `/queries/manager-dashboard`. An employee is sent to `/queries/my-dashboard`. Wrong credentials, and an inactive account, both return `Sign-in failed.`
+
+In a second terminal, with the virtual environment activated and the same variables set, start the agent:
 
 ```powershell
 python agent_worker.py
 ```
 
-`agent_worker.py` runs outside the HTTP server on a 30-second cycle. This skeleton starts both processes. Shift commands, read models, retrieval, and MCP calls are specified in the architecture document and are not implemented yet. The web process still starts when the database and MCP variables are empty. The worker stays idle until `SOMEE_SQLSERVER_CONNECTION_STRING` is set.
+`agent_worker.py` runs outside the HTTP server on a 30-second cycle. The web process still starts when the database and MCP variables are empty. The worker stays idle until `SOMEE_SQLSERVER_CONNECTION_STRING` is set.
