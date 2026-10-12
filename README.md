@@ -74,6 +74,14 @@ Signed-in users can list shifts at `/queries/board` (`mode=week` or `mode=month`
 
 A manager indexes an employee profile into the Chroma vector store at `/commands/profiles`. The profile text (role, experience, skills, shift types, preferences, limitations, and manager notes) is stored in `embedding_profiles`. The vectors are not stored in SQL Server. On Somee, run [db/005_embedding_profiles.sql](db/005_embedding_profiles.sql) once. `flask index-policies` embeds the labor-agreement clauses. A manager matches candidates to a shift at `/queries/semantic-match` with a `shift_id`, or with `required_role` and `note`. Date-specific availability stays in the event log and is not embedded.
 
+The weekly-hours and availability tools are an MCP server, not browser routes. Start it in another terminal:
+
+```powershell
+python mcp_server.py
+```
+
+It exposes `calculate_weekly_hours` and `check_availability_conflicts`. Both read the read models only. On Somee, run [db/006_read_employee_hours.sql](db/006_read_employee_hours.sql) once. A swap request calls the availability tool before it is stored. Tavily search uses `MCP_TAVILY_API_KEY`. Gmail sends through the MCP command in `MCP_GMAIL_COMMAND` when `MCP_GMAIL_CREDENTIALS` is set. `flask dispatch-notifications` emails employees after an approval, rejection, or cancellation and records `NotificationSent` or `NotificationFailed`. The decision stays in effect either way.
+
 In a second terminal, with the virtual environment activated and the same variables set, start the agent:
 
 ```powershell

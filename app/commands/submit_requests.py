@@ -18,6 +18,7 @@ from app.event_store import (
     append_event,
 )
 from app.extensions import db
+from app.tools.conflicts import check_availability_conflicts
 
 ISRAEL = ZoneInfo("Asia/Jerusalem")
 WAITING = "Waiting for agent evaluation"
@@ -95,9 +96,16 @@ def request_swap(*, actor_id, actor_role, shift_id, replacement_employee_id, not
         raise CommandRejected("Both employees must match the shift role.")
     if not _has_assignment_request(actor_id, shift_id):
         raise CommandRejected("You can swap a shift only after you have requested it.")
-    block = _unavailable_reason(replacement.user_id, shift["shift_date"])
-    if block:
-        raise CommandRejected(block)
+    block = check_availability_conflicts(
+        replacement.user_id,
+        shift["shift_date"],
+        shift["start_time"],
+        shift["end_time"],
+    )
+    if not block.get("ok"):
+        raise CommandRejected("The availability check is unavailable.")
+    if block["result"]["hard_block"]:
+        raise CommandRejected(block["result"]["reasons"][0])
     stored_note = note or ""
     if len(stored_note) > 300:
         raise CommandRejected("The note must be at most 300 characters.")
@@ -157,28 +165,6 @@ def _has_assignment_request(employee_id, shift_id):
         if payload.get("employee_id") == employee_id and payload.get("shift_id") == shift_id:
             return True
     return False
-
-
-def _unavailable_reason(employee_id, shift_date):
-    target = date.fromisoformat(shift_date)
-    events = (
-        db.session.query(Event)
-        .filter(
-            Event.aggregate_type == AGGREGATE_EMPLOYEE_AVAILABILITY,
-            Event.event_type == AVAILABILITY_CONSTRAINT_SUBMITTED,
-            Event.actor_id == employee_id,
-        )
-        .all()
-    )
-    for event in events:
-        payload = json.loads(event.payload_json)
-        if payload.get("constraint_type") != "unavailable":
-            continue
-        start = date.fromisoformat(payload["start_date"])
-        end = date.fromisoformat(payload["end_date"])
-        if start <= target <= end:
-            return "The replacement employee is unavailable on this date."
-    return None
 
 
 def _constraint_range(shift_date, start_date, end_date):

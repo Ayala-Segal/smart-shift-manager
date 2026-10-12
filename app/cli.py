@@ -73,6 +73,14 @@ def register_cli(app):
             raise click.ClickException(str(error)) from error
         click.echo("indexed {0} policy paragraphs".format(stored))
 
+    @app.cli.command("dispatch-notifications")
+    def dispatch_notifications_command():
+        """Send Gmail notices for decisions that affect an employee."""
+        from app.notifications.dispatch import dispatch_notifications
+
+        sent = dispatch_notifications()
+        click.echo("sent {0} notifications".format(sent))
+
     @app.cli.command("show-board")
     def show_board_command():
         """Print the shift board from the read model."""

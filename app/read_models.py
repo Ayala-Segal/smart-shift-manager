@@ -39,6 +39,27 @@ class ShiftRequestRow(db.Model):
     replacement_name = db.Column(db.String(120), nullable=True)
 
 
+class EmployeeHoursRow(db.Model):
+    __tablename__ = "read_employee_hours"
+
+    employee_id = db.Column(db.String(64), primary_key=True)
+    week_start = db.Column(db.Date, primary_key=True)
+    approved_hours = db.Column(db.Float, nullable=False)
+
+
+class ApprovedAssignmentRow(db.Model):
+    __tablename__ = "read_approved_assignments"
+
+    assignment_id = db.Column(db.String(64), primary_key=True)
+    employee_id = db.Column(db.String(64), nullable=False, index=True)
+    shift_id = db.Column(db.String(64), nullable=False, index=True)
+    shift_date = db.Column(db.Date, nullable=False)
+    start_time = db.Column(db.String(5), nullable=False)
+    end_time = db.Column(db.String(5), nullable=False)
+    hours = db.Column(db.Float, nullable=False)
+    active = db.Column(db.Boolean, nullable=False, default=True)
+
+
 class AvailabilityConstraintRow(db.Model):
     __tablename__ = "read_availability_constraints"
 

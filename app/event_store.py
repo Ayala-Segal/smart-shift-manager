@@ -2,7 +2,16 @@ import json
 from datetime import datetime, timezone
 from urllib.parse import quote_plus
 
+from sqlalchemy import BigInteger
+from sqlalchemy.ext.compiler import compiles
+
 from app.extensions import db
+
+@compiles(BigInteger, "sqlite")
+def _sqlite_bigint_as_integer(element, compiler, **kw):
+    """SQLite only autoincrements an INTEGER primary key."""
+    return "INTEGER"
+
 
 AGGREGATE_SHIFT = "Shift"
 AGGREGATE_ASSIGNMENT_REQUEST = "AssignmentRequest"
