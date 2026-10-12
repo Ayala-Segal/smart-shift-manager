@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% set title = "Manager dashboard" %}
+{% block content %}
+<h1>Manager dashboard</h1>
+{% if error %}<p class="field-error" role="alert">{{ error }}</p>{% endif %}
+{% if summary %}
+<p class="meta">{{ summary.start }} to {{ summary.end }}</p>
+<form class="filters" method="get" action="{{ url_for('screens.manager_home') }}">
+  <label for="start">Start</label>
+  <input id="start" name="start" type="date" value="{{ summary.start }}">
+  <label for="end">End</label>
+  <input id="end" name="end" type="date" value="{{ summary.end }}">
+  <button type="submit">Apply</button>
+</form>
+<section class="counts" aria-label="Shift counts">
+  <article><span>Open shifts</span><strong>{{ summary.open_shifts }}</strong></article>
+  <article><span>Partial shifts</span><strong>{{ summary.partial_shifts }}</strong></article>
+  <article><span>Staffed shifts</span><strong>{{ summary.staffed_shifts }}</strong></article>
+  <article><span>Waiting for a manager</span><strong>{{ summary.waiting_for_manager }}</strong></article>
+  <article><span>Waiting for the agent</span><strong>{{ summary.waiting_for_agent }}</strong></article>
+</section>
+<h2>Unstaffed shifts</h2>
+{% if summary.unstaffed %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Hours</th>
+        <th>Role</th>
+        <th>Assigned / required</th>
+        <th>Status</th>
+        <th>Waiting candidates</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for shift in summary.unstaffed %}
+      <tr>
+        <td><a href="{{ url_for('screens.shift_card', shift_id=shift.shift_id) }}">{{ shift.weekday }} {{ shift.shift_date }}</a></td>
+        <td>{{ shift.start_time }}–{{ shift.end_time }}</td>
+        <td>{{ shift.required_role }}</td>
+        <td>{{ shift.assigned_count }} / {{ shift.required_headcount }}</td>
+        <td><span class="pill {{ shift.status }}">{{ shift.status }}</span></td>
+        <td>{{ shift.waiting_candidates }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="empty">No unstaffed shifts in this range.</p>
+{% endif %}
+<h2>Agent recommendations</h2>
+{% include "decision_cards.html" %}
+{% endif %}
+{% endblock %}

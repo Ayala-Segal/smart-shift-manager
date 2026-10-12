@@ -113,7 +113,7 @@ def sqlalchemy_uri_from_somee(raw):
     raw = (raw or "").strip()
     if not raw:
         return ""
-    if raw.startswith("mssql+"):
+    if raw.startswith("mssql+") or raw.startswith("sqlite"):
         return raw
 
     fields = parse_ado_net(raw)
@@ -141,9 +141,14 @@ def sqlalchemy_uri_from_somee(raw):
     return "mssql+pyodbc:///?odbc_connect=" + quote_plus(odbc)
 
 
+def ensure_event_store():
+    Event.__table__.create(db.engine, checkfirst=True)
+
+
 def append_event(aggregate_type, aggregate_id, event_type, payload, actor_id):
     if event_type not in EVENT_TYPES:
         raise ValueError(f"Unknown event type: {event_type}")
+    ensure_event_store()
 
     current = (
         db.session.query(db.func.max(Event.version))

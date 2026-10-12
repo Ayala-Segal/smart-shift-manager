@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% set title = "Constraints" %}
+{% block content %}
+<h1>Constraints</h1>
+{% if error %}<p class="field-error" role="alert">{{ error }}</p>{% endif %}
+<form method="post" action="{{ url_for('screens.add_constraint') }}" class="panel">
+  <label for="date">Date</label>
+  <input id="date" name="date" type="date" value="{{ form.date or '' }}">
+  {% if errors.date %}<p class="field-error">{{ errors.date }}</p>{% endif %}
+  <p class="hint">Or enter a range instead of one date.</p>
+  <label for="start_date">Start date</label>
+  <input id="start_date" name="start_date" type="date" value="{{ form.start_date or '' }}">
+  <label for="end_date">End date</label>
+  <input id="end_date" name="end_date" type="date" value="{{ form.end_date or '' }}">
+
+  <label for="constraint_type">Type</label>
+  <select id="constraint_type" name="constraint_type" required>
+    <option value="">Choose a type</option>
+    {% for kind in ["unavailable", "prefer not", "prefer"] %}
+    <option value="{{ kind }}" {% if form.constraint_type == kind %}selected{% endif %}>{{ kind }}</option>
+    {% endfor %}
+  </select>
+  {% if errors.constraint_type %}<p class="field-error">{{ errors.constraint_type }}</p>{% endif %}
+
+  <label for="note">Note</label>
+  <textarea id="note" name="note" maxlength="300">{{ form.note or '' }}</textarea>
+  {% if errors.note %}<p class="field-error">{{ errors.note }}</p>{% endif %}
+  <button type="submit">Save constraint</button>
+</form>
+
+<h2>Saved constraints</h2>
+{% if constraints %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Start</th><th>End</th><th>Type</th><th>Note</th></tr>
+    </thead>
+    <tbody>
+      {% for item in constraints %}
+      <tr>
+        <td>{{ item.start_date }}</td>
+        <td>{{ item.end_date }}</td>
+        <td>{{ item.constraint_type }}</td>
+        <td>{{ item.note }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="empty">No constraints yet.</p>
+{% endif %}
+{% endblock %}

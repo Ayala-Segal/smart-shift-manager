@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% set title = "Search open shifts" if search else "Shift board" %}
+{% block content %}
+<h1>{{ title }}</h1>
+{% if error %}<p class="field-error" role="alert">{{ error }}</p>{% endif %}
+<form class="filters" method="get" action="{{ url_for('screens.search') if search else url_for('screens.board') }}">
+  <label for="mode">Mode</label>
+  <select id="mode" name="mode">
+    <option value="">Custom range</option>
+    <option value="week" {% if filters.get('mode') == 'week' %}selected{% endif %}>Week</option>
+    <option value="month" {% if filters.get('mode') == 'month' %}selected{% endif %}>Month</option>
+  </select>
+  <label for="date">Date</label>
+  <input id="date" name="date" type="date" value="{{ filters.get('date', '') }}">
+  <label for="start">Start</label>
+  <input id="start" name="start" type="date" value="{{ filters.get('start', '') }}">
+  <label for="end">End</label>
+  <input id="end" name="end" type="date" value="{{ filters.get('end', '') }}">
+  {% if not search %}
+  <label for="role">Role</label>
+  <input id="role" name="role" value="{{ filters.get('role', '') }}">
+  <label for="status">Status</label>
+  <select id="status" name="status">
+    <option value="">Any</option>
+    {% for status_name in ["open", "partial", "staffed", "cancelled"] %}
+    <option value="{{ status_name }}" {% if filters.get('status') == status_name %}selected{% endif %}>{{ status_name }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+  <button type="submit">Show shifts</button>
+</form>
+{% if message %}
+<p class="empty">{{ message }}</p>
+<p><a href="{{ url_for('screens.search') if search else url_for('screens.board') }}">Widen the range</a>
+  {% if current_user.role == "manager" %} · <a href="{{ url_for('screens.new_shift') }}">Define a shift</a>{% endif %}
+</p>
+{% endif %}
+{% if shifts %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Hours</th>
+        <th>Role</th>
+        <th>Assigned / required</th>
+        <th>Status</th>
+        <th>Waiting candidates</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for shift in shifts %}
+      <tr>
+        <td><a href="{{ url_for('screens.shift_card', shift_id=shift.shift_id) }}">{{ shift.weekday }} {{ shift.shift_date.isoformat() }}</a></td>
+        <td>{{ shift.start_time }}–{{ shift.end_time }}</td>
+        <td>{{ shift.required_role }}</td>
+        <td>{{ shift.assigned_count }} / {{ shift.required_headcount }}</td>
+        <td><span class="pill {{ shift.status }}">{{ shift.status }}</span></td>
+        <td>{{ shift.waiting_candidates }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}
