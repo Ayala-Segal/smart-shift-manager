@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app import create_app
+from app.agent.cycle import run_evaluation_cycle
 from app.commands.decide_request import decide_request
 from app.commands.define_shift import define_shift
 from app.event_store import (
@@ -27,6 +28,9 @@ ISRAEL = ZoneInfo("Asia/Jerusalem")
 class Stage7ScreenTests(unittest.TestCase):
     def setUp(self):
         self._saved_connection = os.environ.pop("SOMEE_SQLSERVER_CONNECTION_STRING", None)
+        self._saved_tavily = os.environ.pop("MCP_TAVILY_API_KEY", None)
+        self._saved_gmail_command = os.environ.pop("MCP_GMAIL_COMMAND", None)
+        self._saved_gmail_credentials = os.environ.pop("MCP_GMAIL_CREDENTIALS", None)
         self.app = create_app()
         self.app.config["TESTING"] = True
         self.client = self.app.test_client()
@@ -64,8 +68,16 @@ class Stage7ScreenTests(unittest.TestCase):
             db.session.remove()
             db.drop_all()
             db.engine.dispose()
-        if self._saved_connection is not None:
-            os.environ["SOMEE_SQLSERVER_CONNECTION_STRING"] = self._saved_connection
+        self._restore("SOMEE_SQLSERVER_CONNECTION_STRING", self._saved_connection)
+        self._restore("MCP_TAVILY_API_KEY", self._saved_tavily)
+        self._restore("MCP_GMAIL_COMMAND", self._saved_gmail_command)
+        self._restore("MCP_GMAIL_CREDENTIALS", self._saved_gmail_credentials)
+
+    def _restore(self, name, value):
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
 
     def test_manager_can_export_the_shift_report(self):
         self._login("noa@example.com")
@@ -357,6 +369,8 @@ class Stage7ScreenTests(unittest.TestCase):
         )
         self.assertEqual(submitted.status_code, 200)
         self.assertIn("Request #0", submitted.get_data(as_text=True))
+        with self.app.app_context():
+            run_evaluation_cycle(self.app)
         self._login("noa@example.com")
         page = self.client.get("/decisions")
         text = page.get_data(as_text=True)

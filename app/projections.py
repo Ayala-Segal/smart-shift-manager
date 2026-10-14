@@ -275,7 +275,7 @@ def _apply_swap_approved(event):
         .filter(
             ApprovedAssignmentRow.employee_id == payload["employee_id"],
             ApprovedAssignmentRow.shift_id == payload["shift_id"],
-            ApprovedAssignmentRow.active.is_(True),
+            ApprovedAssignmentRow.active == True,
         )
         .first()
     )

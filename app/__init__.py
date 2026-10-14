@@ -39,10 +39,7 @@ def create_app():
     db.init_app(app)
     login_manager.init_app(app)
 
-    @app.before_request
-    def prepare_storage():
-        if request.endpoint == "static":
-            return None
+    with app.app_context():
         from app.auth.service import ensure_accounts_table
         from app.event_store import ensure_event_store
         from app.projections import ensure_read_models
@@ -50,7 +47,6 @@ def create_app():
         ensure_event_store()
         ensure_read_models()
         ensure_accounts_table()
-        return None
 
     @login_manager.unauthorized_handler
     def unauthorized():

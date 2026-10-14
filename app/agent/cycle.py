@@ -251,7 +251,7 @@ def _recent_assignments(employee_id, shift_date):
             ApprovedAssignmentRow.employee_id == employee_id,
             ApprovedAssignmentRow.shift_date >= start,
             ApprovedAssignmentRow.shift_date <= shift_date,
-            ApprovedAssignmentRow.active.is_(True),
+            ApprovedAssignmentRow.active == True,
         )
         .count()
     )

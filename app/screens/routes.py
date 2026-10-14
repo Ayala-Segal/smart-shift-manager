@@ -5,7 +5,6 @@ from functools import wraps
 from flask import Response, current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_user, logout_user
 
-from app.agent.cycle import run_evaluation_cycle
 from app.auth.models import ROLE_EMPLOYEE, ROLE_MANAGER, User
 from app.auth.service import SIGN_IN_FAILED, RegistrationError, authenticate, register_user, update_profile
 from app.commands.decide_request import decide_request
@@ -17,9 +16,9 @@ from app.commands.submit_requests import (
     respond_to_swap,
     submit_availability,
 )
-from app.event_store import ASSIGNMENT_APPROVED, ASSIGNMENT_REQUESTED, SWAP_APPROVED, SWAP_COLLEAGUE_APPROVED
+from app.event_store import ASSIGNMENT_APPROVED, SWAP_APPROVED
 from app.extensions import db
-from app.notifications.dispatch import dispatch_notifications
+from app.notifications.dispatch import dispatch_notifications_later
 from app.projections import project_shift_board
 from app.queries.board import (
     board_filters_from_request,
@@ -110,7 +109,6 @@ def sign_out():
 @screens_bp.get("/manager")
 @screen_role(ROLE_MANAGER)
 def manager_home():
-    _settle_agent()
     start, end, error = _optional_range()
     summary = manager_dashboard_summary(start=start, end=end) if error is None else None
     decisions = pending_decisions() if summary is not None else []
@@ -207,7 +205,6 @@ def create_shift():
 @screens_bp.get("/shifts/<shift_id>")
 @screen_role(ROLE_MANAGER, ROLE_EMPLOYEE)
 def shift_card(shift_id):
-    _settle_agent()
     row = db.session.get(ShiftBoardRow, shift_id)
     if row is None:
         return render_template("forbidden.html", message="The shift does not exist."), 404
@@ -253,8 +250,6 @@ def request_shift(shift_id):
             candidates=_matching_employees(row.required_role),
         ), 400
     project_shift_board()
-    if event.event_type == ASSIGNMENT_REQUESTED:
-        _settle_agent()
     _flash_request(event)
     return redirect(url_for("screens.shift_card", shift_id=shift_id))
 
@@ -289,7 +284,6 @@ def register_for_shift(shift_id):
             candidates=_matching_employees(row.required_role),
         ), 400
     project_shift_board()
-    _settle_agent()
     _flash_request(event)
     return redirect(url_for("screens.decisions"))
 
@@ -297,7 +291,6 @@ def register_for_shift(shift_id):
 @screens_bp.get("/decisions")
 @screen_role(ROLE_MANAGER)
 def decisions():
-    _settle_agent()
     return render_template(
         "decisions.html",
         decisions=pending_decisions(),
@@ -330,7 +323,7 @@ def decide(request_id):
             field_error=message if "note" in message.lower() else "",
         ), 400
     project_shift_board()
-    dispatch_notifications()
+    dispatch_notifications_later(current_app._get_current_object())
     status = "Approved" if event.event_type in {ASSIGNMENT_APPROVED, SWAP_APPROVED} else "Rejected"
     flash("Request {0} is {1}.".format(event.aggregate_id, status))
     return redirect(url_for("screens.decisions"))
@@ -457,8 +450,6 @@ def respond_swap(request_id):
             error=str(error),
         ), 400
     project_shift_board()
-    if event.event_type == SWAP_COLLEAGUE_APPROVED:
-        _settle_agent()
     _flash_request(event)
     return redirect(url_for("screens.swap_approvals"))
 
@@ -494,20 +485,12 @@ def update_profile_screen():
     return redirect(url_for("screens.profile"))
 
 
-def _settle_agent():
-    try:
-        run_evaluation_cycle(current_app._get_current_object())
-    except Exception as error:
-        db.session.rollback()
-        print("agent cycle failed: {0}".format(error), flush=True)
-
-
 def _matching_employees(required_role):
     return (
         db.session.query(User)
         .filter(
             User.role == ROLE_EMPLOYEE,
-            User.is_active.is_(True),
+            User.is_active == True,
             User.professional_role == required_role,
         )
         .order_by(User.full_name)

@@ -33,6 +33,22 @@ SUBJECTS = {
 }
 
 
+def dispatch_notifications_later(app):
+    """Send decision mail without holding the browser request open."""
+    import threading
+
+    def run():
+        with app.app_context():
+            try:
+                dispatch_notifications()
+            except Exception:
+                db.session.rollback()
+            finally:
+                db.session.remove()
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 def dispatch_notifications(transport=None):
     """Send one email per decision that affects an employee, then record the result."""
     project_shift_board()

@@ -15,10 +15,19 @@ def main():
         if not connection:
             print("event store is not configured; idle cycle", flush=True)
         else:
-            if app is None:
-                app = create_app()
-            evaluated = run_evaluation_cycle(app)
-            print("evaluation cycle finished; recommendations={0}".format(evaluated), flush=True)
+            try:
+                if app is None:
+                    app = create_app()
+                evaluated = run_evaluation_cycle(app)
+                print("evaluation cycle finished; recommendations={0}".format(evaluated), flush=True)
+            except Exception as error:
+                print("evaluation cycle failed: {0}".format(error), flush=True)
+                if app is not None:
+                    from app.extensions import db
+
+                    with app.app_context():
+                        db.session.remove()
+                        db.engine.dispose()
         time.sleep(CYCLE_SECONDS)
 
 

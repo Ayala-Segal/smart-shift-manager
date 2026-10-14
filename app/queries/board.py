@@ -228,7 +228,7 @@ def _assignees(shift_id, viewer):
         db.session.query(ApprovedAssignmentRow)
         .filter(
             ApprovedAssignmentRow.shift_id == shift_id,
-            ApprovedAssignmentRow.active.is_(True),
+            ApprovedAssignmentRow.active == True,
         )
         .order_by(ApprovedAssignmentRow.employee_id)
         .all()
