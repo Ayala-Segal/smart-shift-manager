@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% set title = "Shift" %}
+{% block content %}
+{% set shift = detail.shift %}
+<p><a href="{{ url_for('screens.board') }}">Back to the board</a></p>
+<h1>{{ shift.weekday }} {{ shift.shift_date }}</h1>
+<p class="meta">{{ shift.start_time }}–{{ shift.end_time }} · {{ shift.required_role }} · {{ shift.assigned_count }} / {{ shift.required_headcount }}</p>
+<p><span class="pill {{ shift.status }}">{{ shift.status }}</span> · {{ shift.waiting_candidates }} waiting</p>
+{% if shift.note %}<p>{{ shift.note }}</p>{% endif %}
+{% if error %}<p class="field-error" role="alert">{{ error }}</p>{% endif %}
+
+<h2>Approved assignees</h2>
+{% if detail.assignees %}
+<ul>
+  {% for person in detail.assignees %}
+  <li>{{ person.full_name or person.first_name }} · {{ person.professional_role }}</li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="empty">No approved assignees yet.</p>
+{% endif %}
+
+<h2>Requests</h2>
+{% if detail.registered %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Status</th>
+        {% if current_user.role == "manager" %}<th>Recommendation</th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in detail.registered %}
+      <tr>
+        <td>{{ item.full_name or item.first_name }}</td>
+        <td>{{ item.request_type }}</td>
+        <td>{{ item.status }}</td>
+        {% if current_user.role == "manager" %}
+        <td>
+          {% if item.recommendation %}
+          <span class="pill {{ item.recommendation }}">{{ item.recommendation }}</span>
+          <span>{{ item.rationale }}</span>
+          {% if item.hours_warning %}<span class="pill warning">hours warning</span>{% endif %}
+          {% endif %}
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="empty">No requests yet.</p>
+{% endif %}
+
+{% if current_user.role == "employee" and shift.status in ["open", "partial"] %}
+<h2>Request this shift</h2>
+<form method="post" action="{{ url_for('screens.request_shift', shift_id=shift.shift_id) }}">
+  <label for="note">Note</label>
+  <textarea id="note" name="note" maxlength="300"></textarea>
+  <button type="submit">Submit request</button>
+</form>
+{% endif %}
+{% endblock %}

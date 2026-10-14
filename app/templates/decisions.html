@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% set title = "Requests for decision" %}
+{% block content %}
+<h1>Requests for decision</h1>
+{% if error %}<p class="field-error" role="alert">{{ error }}</p>{% endif %}
+{% include "decision_cards.html" %}
+{% endblock %}

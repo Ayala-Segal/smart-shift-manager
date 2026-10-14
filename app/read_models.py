@@ -35,6 +35,7 @@ class ShiftRequestRow(db.Model):
     professional_role = db.Column(db.String(64), nullable=False)
     status = db.Column(db.String(64), nullable=False)
     note = db.Column(db.String(300), nullable=False, default="")
+    decision_note = db.Column(db.String(300), nullable=False, default="")
     replacement_employee_id = db.Column(db.String(64), nullable=True)
     replacement_name = db.Column(db.String(120), nullable=True)
 

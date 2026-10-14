@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% set title = "Request a swap" %}
+{% block content %}
+<section class="panel">
+  <h1>Request a swap</h1>
+  {% if error %}<p class="field-error" role="alert">{{ error }}</p>{% endif %}
+  {% if not shifts %}
+  <p class="empty">You have no approved shift to offer.</p>
+  {% else %}
+  <form method="post" action="{{ url_for('screens.request_swap_screen') }}">
+    <label for="shift_id">Approved shift</label>
+    <select id="shift_id" name="shift_id" required>
+      {% for shift in shifts %}
+      <option value="{{ shift.shift_id }}" {% if form.shift_id == shift.shift_id %}selected{% endif %}>
+        {{ shift.shift_date }} {{ shift.start_time }}–{{ shift.end_time }} · {{ shift.required_role }}
+      </option>
+      {% endfor %}
+    </select>
+    <label for="replacement_employee_id">Replacement employee</label>
+    <select id="replacement_employee_id" name="replacement_employee_id" required>
+      {% for person in employees %}
+      <option value="{{ person.user_id }}" {% if form.replacement_employee_id == person.user_id %}selected{% endif %}>
+        {{ person.full_name }} · {{ person.professional_role }}
+      </option>
+      {% endfor %}
+    </select>
+    <label for="note">Note</label>
+    <textarea id="note" name="note" maxlength="300">{{ form.note or '' }}</textarea>
+    <button type="submit">Submit swap</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,9 +1,12 @@
-from flask import Blueprint, current_app, jsonify, request
+from datetime import date
+
+from flask import Blueprint, current_app, jsonify, redirect, request
 from flask_login import current_user
 
 from app.auth.guards import role_required
 from app.auth.models import ROLE_EMPLOYEE, ROLE_MANAGER
 from app.extensions import db
+from app.queries.dashboard import employee_dashboard, manager_dashboard_summary, pending_decisions
 from app.queries.board import (
     board_filters_from_request,
     get_shift_board,
@@ -27,23 +30,37 @@ def status():
 @queries_bp.get("/manager-dashboard")
 @role_required(ROLE_MANAGER)
 def manager_dashboard():
-    return jsonify(
-        {
-            "dashboard": "manager",
-            "user_id": current_user.user_id,
-        }
-    )
+    if _wants_html():
+        return redirect("/manager")
+    try:
+        summary = manager_dashboard_summary(
+            start=_query_date("start"),
+            end=_query_date("end"),
+        )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    summary["dashboard"] = "manager"
+    summary["user_id"] = current_user.user_id
+    return jsonify(summary)
 
 
 @queries_bp.get("/my-dashboard")
 @role_required(ROLE_EMPLOYEE)
 def my_dashboard():
-    return jsonify(
-        {
-            "dashboard": "employee",
-            "user_id": current_user.user_id,
-        }
-    )
+    if _wants_html():
+        return redirect("/me")
+    summary = employee_dashboard(current_user.user_id)
+    summary["dashboard"] = "employee"
+    summary["user_id"] = current_user.user_id
+    return jsonify(summary)
+
+
+@queries_bp.get("/decisions")
+@role_required(ROLE_MANAGER)
+def decisions():
+    if _wants_html():
+        return redirect("/decisions")
+    return jsonify({"decisions": pending_decisions()})
 
 
 @queries_bp.get("/board")
@@ -101,6 +118,20 @@ def semantic_context():
     except RetrievalUnavailable:
         return jsonify({"error": "Semantic search is unavailable."}), 503
     return jsonify({"query": query_text, "passages": passages})
+
+
+def _wants_html():
+    return "text/html" in request.headers.get("Accept", "")
+
+
+def _query_date(name):
+    value = (request.args.get(name) or "").strip()
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError("Dates must use YYYY-MM-DD.") from error
 
 
 def _semantic_query(body):

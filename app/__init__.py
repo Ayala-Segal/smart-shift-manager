@@ -2,7 +2,8 @@ import os
 from uuid import uuid4
 
 import click
-from flask import Flask, jsonify
+from flask import Flask, jsonify, redirect, request
+from flask_login import current_user
 from sqlalchemy.pool import StaticPool
 
 from app.extensions import db, login_manager
@@ -34,6 +35,19 @@ def create_app():
     db.init_app(app)
     login_manager.init_app(app)
 
+    @app.before_request
+    def prepare_storage():
+        if request.endpoint == "static":
+            return None
+        from app.auth.service import ensure_accounts_table
+        from app.event_store import ensure_event_store
+        from app.projections import ensure_read_models
+
+        ensure_event_store()
+        ensure_read_models()
+        ensure_accounts_table()
+        return None
+
     @login_manager.unauthorized_handler
     def unauthorized():
         return jsonify({"error": "Sign-in required."}), 401
@@ -43,15 +57,22 @@ def create_app():
     from app.commands import commands_bp
     from app.notifications import notifications_bp
     from app.queries import queries_bp
+    from app.screens import screens_bp
 
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(commands_bp, url_prefix="/commands")
     app.register_blueprint(queries_bp, url_prefix="/queries")
     app.register_blueprint(notifications_bp, url_prefix="/notifications")
+    app.register_blueprint(screens_bp)
     register_cli(app)
 
     @app.get("/")
     def index():
+        if "text/html" in request.headers.get("Accept", ""):
+            if current_user.is_authenticated:
+                target = "/manager" if current_user.role == "manager" else "/me"
+                return redirect(target)
+            return redirect("/sign-in")
         return {"status": "ok", "service": "smart-shift-manager"}
 
     @app.cli.command("append-sample-event")
