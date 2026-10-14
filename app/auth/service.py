@@ -4,7 +4,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from app.auth.models import ROLES, ROLE_EMPLOYEE, User
+from app.auth.models import PROFESSIONAL_ROLES, ROLES, ROLE_EMPLOYEE, User, canonical_professional_role
 from app.extensions import db
 
 SIGN_IN_FAILED = "Sign-in failed."
@@ -16,7 +16,16 @@ class RegistrationError(Exception):
 
 
 def ensure_accounts_table():
-    User.__table__.create(db.engine, checkfirst=True)
+    from app.extensions import run_once
+
+    def setup():
+        User.__table__.create(db.engine, checkfirst=True)
+        _ensure_account_columns()
+
+    run_once("accounts_ready", setup)
+
+
+def _ensure_account_columns():
     _ensure_account_column(
         "locality",
         "ALTER TABLE users ADD COLUMN locality VARCHAR(80) NOT NULL DEFAULT 'Israel'",
@@ -40,7 +49,7 @@ def register_user(full_name, email, password, role, professional_role):
         email=email.strip().lower(),
         password_hash=generate_password_hash(password),
         role=role,
-        professional_role=(professional_role or "").strip(),
+        professional_role=_stored_professional_role(role, professional_role, {}),
         is_active=True,
     )
     db.session.add(user)
@@ -72,11 +81,7 @@ def update_profile(user, *, full_name, professional_role, locality, notify_email
         errors["full_name"] = "Enter your full name."
     elif len(name) > 120:
         errors["full_name"] = "Full name must be 120 characters or fewer."
-    profession = (professional_role or "").strip()
-    if user.role == ROLE_EMPLOYEE and not profession:
-        errors["professional_role"] = "Enter the professional role for this employee."
-    elif len(profession) > 64:
-        errors["professional_role"] = "Professional role must be 64 characters or fewer."
+    profession = _stored_professional_role(user.role, professional_role, errors)
     place = (locality or "").strip() or "Israel"
     if len(place) > 80:
         errors["locality"] = "Locality must be 80 characters or fewer."
@@ -123,9 +128,23 @@ def _registration_errors(full_name, email, password, role, professional_role):
         errors["password"] = "Password must be at least 8 characters."
     if role not in ROLES:
         errors["role"] = "Role must be manager or employee."
-    profession = (professional_role or "").strip()
-    if role == ROLE_EMPLOYEE and not profession:
-        errors["professional_role"] = "Enter the professional role for this employee."
-    elif len(profession) > 64:
-        errors["professional_role"] = "Professional role must be 64 characters or fewer."
+    _stored_professional_role(role, professional_role, errors)
     return errors
+
+
+def _stored_professional_role(account_role, professional_role, errors):
+    raw = (professional_role or "").strip()
+    canonical = canonical_professional_role(raw)
+    if account_role == ROLE_EMPLOYEE:
+        if canonical is None:
+            errors["professional_role"] = "Professional role must be {0}.".format(
+                ", ".join(PROFESSIONAL_ROLES)
+            )
+            return ""
+        return canonical
+    if canonical is not None:
+        return canonical
+    if len(raw) > 64:
+        errors["professional_role"] = "Professional role must be 64 characters or fewer."
+        return ""
+    return raw

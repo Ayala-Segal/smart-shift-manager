@@ -3,6 +3,7 @@ import time
 
 from app import create_app
 from app.agent.cycle import run_evaluation_cycle
+from app.extensions import db
 
 CYCLE_SECONDS = 30
 
@@ -17,8 +18,14 @@ def main():
         else:
             if app is None:
                 app = create_app()
-            evaluated = run_evaluation_cycle(app)
-            print("evaluation cycle finished; recommendations={0}".format(evaluated), flush=True)
+            try:
+                evaluated = run_evaluation_cycle(app)
+            except Exception as error:
+                with app.app_context():
+                    db.session.rollback()
+                print("evaluation cycle failed: {0}".format(error), flush=True)
+            else:
+                print("evaluation cycle finished; recommendations={0}".format(evaluated), flush=True)
         time.sleep(CYCLE_SECONDS)
 
 

@@ -89,3 +89,12 @@ python agent_worker.py
 ```
 
 `agent_worker.py` runs outside the HTTP server on a 30-second cycle. The web process still starts when the database and MCP variables are empty. The worker stays idle until `SOMEE_SQLSERVER_CONNECTION_STRING` is set.
+
+The agent decides with the scheduling rules. Ollama only rewrites the English rationale. If it is not running, the rule-written rationale is stored and the decision is unchanged. Start the model with Docker, then pull it once:
+
+```powershell
+docker compose up -d
+docker compose exec ollama ollama pull llama3.2
+```
+
+Installing Ollama for Windows and leaving it on `http://127.0.0.1:11434` is the same endpoint. `OLLAMA_BASE_URL` and `OLLAMA_MODEL` in `.env` select the server and the model.

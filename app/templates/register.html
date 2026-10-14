@@ -24,7 +24,12 @@
     {% if errors.role %}<p class="field-error">{{ errors.role }}</p>{% endif %}
 
     <label for="professional_role">Professional role</label>
-    <input id="professional_role" name="professional_role" value="{{ form.professional_role }}">
+    <select id="professional_role" name="professional_role">
+      <option value="">Select a role</option>
+      {% for role_name in professional_roles %}
+      <option value="{{ role_name }}" {% if form.professional_role == role_name %}selected{% endif %}>{{ role_name }}</option>
+      {% endfor %}
+    </select>
     {% if errors.professional_role %}<p class="field-error">{{ errors.professional_role }}</p>{% endif %}
 
     <button type="submit">Create account</button>

@@ -2,6 +2,7 @@ from datetime import date, datetime
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+from app.auth.models import PROFESSIONAL_ROLES, canonical_professional_role
 from app.event_store import AGGREGATE_SHIFT, SHIFT_DEFINED, Event, append_event
 from app.extensions import db
 
@@ -44,9 +45,11 @@ def validate_shift_definition(
     if int(required_headcount) < 1:
         raise CommandRejected("The required headcount must be at least 1.")
 
-    role = (required_role or "").strip()
-    if not role:
-        raise CommandRejected("The shift needs a required role.")
+    role = canonical_professional_role(required_role)
+    if role is None:
+        raise CommandRejected(
+            "The required role must be {0}.".format(", ".join(PROFESSIONAL_ROLES))
+        )
 
     stored_note = note or ""
     if len(stored_note) > 300:

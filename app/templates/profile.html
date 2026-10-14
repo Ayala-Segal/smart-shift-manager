@@ -12,7 +12,14 @@
     <input id="full_name" name="full_name" value="{{ current_user.full_name }}" required>
     {% if errors.full_name %}<p class="field-error">{{ errors.full_name }}</p>{% endif %}
     <label for="professional_role">Professional role</label>
-    <input id="professional_role" name="professional_role" value="{{ current_user.professional_role }}">
+    <select id="professional_role" name="professional_role">
+      {% if current_user.professional_role and current_user.professional_role not in professional_roles %}
+      <option value="{{ current_user.professional_role }}" selected>{{ current_user.professional_role }}</option>
+      {% endif %}
+      {% for role_name in professional_roles %}
+      <option value="{{ role_name }}" {% if current_user.professional_role == role_name %}selected{% endif %}>{{ role_name }}</option>
+      {% endfor %}
+    </select>
     {% if errors.professional_role %}<p class="field-error">{{ errors.professional_role }}</p>{% endif %}
 
     <h2>System settings</h2>

@@ -56,13 +56,15 @@
 <p class="empty">No requests yet.</p>
 {% endif %}
 
-{% if current_user.role == "employee" and detail.registration_open %}
+{% if current_user.role == "employee" and detail.registration_open and detail.role_matches %}
 <h2>Request this shift</h2>
 <form method="post" action="{{ url_for('screens.request_shift', shift_id=shift.shift_id) }}">
   <label for="note">Note</label>
   <textarea id="note" name="note" maxlength="300"></textarea>
   <button type="submit">Submit request</button>
 </form>
+{% elif current_user.role == "employee" and detail.registration_open %}
+<p class="empty">Your professional role does not match this shift. Only a {{ shift.required_role }} can request it.</p>
 {% elif current_user.role == "employee" %}
 <p class="empty">This shift is closed, so registration is closed.</p>
 {% elif current_user.role == "manager" and detail.registration_open %}

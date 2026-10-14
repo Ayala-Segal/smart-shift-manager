@@ -146,7 +146,12 @@ def sqlalchemy_uri_from_somee(raw):
 
 
 def ensure_event_store():
-    Event.__table__.create(db.engine, checkfirst=True)
+    from app.extensions import run_once
+
+    def setup():
+        Event.__table__.create(db.engine, checkfirst=True)
+
+    run_once("event_store_ready", setup)
 
 
 def append_event(aggregate_type, aggregate_id, event_type, payload, actor_id):

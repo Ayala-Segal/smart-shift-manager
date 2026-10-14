@@ -3,7 +3,7 @@ from datetime import date, datetime
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from app.auth.models import ROLE_EMPLOYEE, ROLE_MANAGER, User
+from app.auth.models import ROLE_EMPLOYEE, ROLE_MANAGER, User, professional_roles_match
 from app.commands.define_shift import CommandRejected
 from app.event_store import (
     AGGREGATE_ASSIGNMENT_REQUEST,
@@ -73,7 +73,7 @@ def _queue_assignment(*, employee_id, actor_id, shift_id, note, today):
         raise CommandRejected("Assignment requests are only accepted for a current or future shift.")
     if shift["status"] not in {"open", "partial"}:
         raise CommandRejected("Assignment requests are only accepted for open or partial shifts.")
-    if employee.professional_role != shift["required_role"]:
+    if not professional_roles_match(employee.professional_role, shift["required_role"]):
         raise CommandRejected("Your professional role does not match this shift.")
     if _has_assignment_request(employee_id, shift_id):
         raise CommandRejected("You already requested this shift.")
@@ -122,7 +122,7 @@ def request_swap(*, actor_id, actor_role, shift_id, replacement_employee_id, not
     current_day = today or datetime.now(ISRAEL).date()
     if date.fromisoformat(shift["shift_date"]) < current_day:
         raise CommandRejected("A swap is only possible for a future shift.")
-    if employee.professional_role != shift["required_role"] or replacement.professional_role != shift["required_role"]:
+    if not professional_roles_match(employee.professional_role, shift["required_role"]) or not professional_roles_match(replacement.professional_role, shift["required_role"]):
         raise CommandRejected("Both employees must match the shift role.")
     if not _has_assignment_request(actor_id, shift_id):
         raise CommandRejected("You can swap a shift only after you have requested it.")

@@ -5,6 +5,20 @@ from app.extensions import db, login_manager
 ROLE_MANAGER = "manager"
 ROLE_EMPLOYEE = "employee"
 ROLES = frozenset({ROLE_MANAGER, ROLE_EMPLOYEE})
+PROFESSIONAL_ROLES = ("cashier", "shift lead", "representative")
+
+
+def canonical_professional_role(value):
+    """Return the stored spelling of a known professional role."""
+    cleaned = (value or "").strip().casefold()
+    for role in PROFESSIONAL_ROLES:
+        if role.casefold() == cleaned:
+            return role
+    return None
+
+
+def professional_roles_match(left, right):
+    return (left or "").strip().casefold() == (right or "").strip().casefold() and bool((left or "").strip())
 
 
 class User(UserMixin, db.Model):

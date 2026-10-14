@@ -22,7 +22,11 @@
     </label>
 
     <label for="required_role">Role</label>
-    <input id="required_role" name="required_role" value="{{ form.required_role or '' }}" required>
+    <select id="required_role" name="required_role" required>
+      {% for role_name in professional_roles %}
+      <option value="{{ role_name }}" {% if form.required_role == role_name %}selected{% endif %}>{{ role_name }}</option>
+      {% endfor %}
+    </select>
     {% if errors.required_role %}<p class="field-error">{{ errors.required_role }}</p>{% endif %}
 
     <label for="required_headcount">Required headcount</label>

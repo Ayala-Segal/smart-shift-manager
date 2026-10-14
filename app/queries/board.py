@@ -4,7 +4,7 @@ import json
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from app.auth.models import ROLE_EMPLOYEE, User
+from app.auth.models import ROLE_EMPLOYEE, User, professional_roles_match
 from app.extensions import db
 from app.read_models import ApprovedAssignmentRow, RequestRecommendationRow, ShiftBoardRow, ShiftRequestRow
 
@@ -157,6 +157,10 @@ def shift_detail_payload(row, requests, viewer, recommendations=None):
         "registered": visible,
         "assignees": _assignees(row.shift_id, viewer),
         "registration_open": row.status in OPEN_STATUSES and row.shift_date >= today,
+        "role_matches": professional_roles_match(
+            getattr(viewer, "professional_role", ""),
+            row.required_role,
+        ),
     }
 
 
@@ -228,7 +232,7 @@ def _assignees(shift_id, viewer):
         db.session.query(ApprovedAssignmentRow)
         .filter(
             ApprovedAssignmentRow.shift_id == shift_id,
-            ApprovedAssignmentRow.active.is_(True),
+            ApprovedAssignmentRow.active == True,
         )
         .order_by(ApprovedAssignmentRow.employee_id)
         .all()

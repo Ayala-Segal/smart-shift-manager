@@ -7,6 +7,7 @@ from uuid import uuid4
 from sqlalchemy.exc import IntegrityError
 
 from app.agent.decision import decide
+from app.agent.ollama import rationale_facts, rewrite_rationale
 from app.auth.models import User
 from app.event_store import (
     AGENT_EVALUATION_COMPLETED,
@@ -38,12 +39,14 @@ def run_evaluation_cycle(
     weekly_hours=None,
     search=None,
     retrieve=None,
+    narrate=None,
     run_id=None,
 ):
     availability = availability or check_availability_conflicts
     weekly_hours = weekly_hours or calculate_weekly_hours
     search = search or search_date_context
     retrieve = retrieve or _retrieve
+    narrate = narrate or rewrite_rationale
     run_id = run_id or uuid4().hex
     evaluated = 0
     with app.app_context():
@@ -61,6 +64,7 @@ def run_evaluation_cycle(
                     weekly_hours=weekly_hours,
                     search=search,
                     retrieve=retrieve,
+                    narrate=narrate,
                 )
             except Exception as error:
                 db.session.rollback()
@@ -86,7 +90,7 @@ def run_evaluation_cycle(
     return evaluated
 
 
-def _evaluate_one(app, request, *, availability, weekly_hours, search, retrieve):
+def _evaluate_one(app, request, *, availability, weekly_hours, search, retrieve, narrate):
     if _already_evaluated(request["request_id"]):
         return None
     shift = db.session.get(ShiftBoardRow, request["payload"]["shift_id"])
@@ -122,14 +126,29 @@ def _evaluate_one(app, request, *, availability, weekly_hours, search, retrieve)
     locality = (getattr(person, "locality", None) or "Israel").strip() or "Israel"
     tavily = _call_search(search, shift.shift_date.isoformat(), locality)
     retrieval_ok, passage_count = _passages(app, retrieve, subject_id, shift)
+    role_matches = role_name == shift.required_role
     choice = decide(
-        role_matches=role_name == shift.required_role,
+        role_matches=role_matches,
         conflict=conflict,
         hours=hours,
         tavily=tavily,
         retrieval_ok=retrieval_ok,
         shift_hours=shift_hours,
     )
+    rewritten, used_model = narrate(
+        choice["rationale"],
+        rationale_facts(
+            decision=choice["decision"],
+            role_matches=role_matches,
+            conflict=conflict,
+            hours=hours,
+            tavily=tavily,
+            shift_hours=shift_hours,
+            fallback=choice["rationale"],
+        ),
+    )
+    choice = dict(choice)
+    choice["rationale"] = rewritten
     sources = _sources(
         conflict,
         hours,
@@ -138,6 +157,7 @@ def _evaluate_one(app, request, *, availability, weekly_hours, search, retrieve)
         passage_count,
         _recent_assignments(subject_id, shift.shift_date),
     )
+    sources.append({"name": "ollama", "ok": bool(used_model)})
     return _store_evaluation(request, shift, subject_id, choice, sources)
 
 
@@ -251,7 +271,7 @@ def _recent_assignments(employee_id, shift_date):
             ApprovedAssignmentRow.employee_id == employee_id,
             ApprovedAssignmentRow.shift_date >= start,
             ApprovedAssignmentRow.shift_date <= shift_date,
-            ApprovedAssignmentRow.active.is_(True),
+            ApprovedAssignmentRow.active == True,
         )
         .count()
     )

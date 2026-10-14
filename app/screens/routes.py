@@ -6,7 +6,7 @@ from flask import Response, current_app, flash, redirect, render_template, reque
 from flask_login import current_user, login_user, logout_user
 
 from app.agent.cycle import run_evaluation_cycle
-from app.auth.models import ROLE_EMPLOYEE, ROLE_MANAGER, User
+from app.auth.models import ROLE_EMPLOYEE, ROLE_MANAGER, User, professional_roles_match
 from app.auth.service import SIGN_IN_FAILED, RegistrationError, authenticate, register_user, update_profile
 from app.commands.decide_request import decide_request
 from app.commands.define_shift import CommandRejected, define_shift
@@ -110,7 +110,6 @@ def sign_out():
 @screens_bp.get("/manager")
 @screen_role(ROLE_MANAGER)
 def manager_home():
-    _settle_agent()
     start, end, error = _optional_range()
     summary = manager_dashboard_summary(start=start, end=end) if error is None else None
     decisions = pending_decisions() if summary is not None else []
@@ -207,7 +206,6 @@ def create_shift():
 @screens_bp.get("/shifts/<shift_id>")
 @screen_role(ROLE_MANAGER, ROLE_EMPLOYEE)
 def shift_card(shift_id):
-    _settle_agent()
     row = db.session.get(ShiftBoardRow, shift_id)
     if row is None:
         return render_template("forbidden.html", message="The shift does not exist."), 404
@@ -297,7 +295,6 @@ def register_for_shift(shift_id):
 @screens_bp.get("/decisions")
 @screen_role(ROLE_MANAGER)
 def decisions():
-    _settle_agent()
     return render_template(
         "decisions.html",
         decisions=pending_decisions(),
@@ -503,16 +500,16 @@ def _settle_agent():
 
 
 def _matching_employees(required_role):
-    return (
+    rows = (
         db.session.query(User)
         .filter(
             User.role == ROLE_EMPLOYEE,
-            User.is_active.is_(True),
-            User.professional_role == required_role,
+            User.is_active == True,
         )
         .order_by(User.full_name)
         .all()
     )
+    return [row for row in rows if professional_roles_match(row.professional_role, required_role)]
 
 
 def _flash_request(event):

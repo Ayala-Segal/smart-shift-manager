@@ -75,7 +75,7 @@ def _nearby_assignments(employee_id, day):
         db.session.query(ApprovedAssignmentRow)
         .filter(
             ApprovedAssignmentRow.employee_id == employee_id,
-            ApprovedAssignmentRow.active.is_(True),
+            ApprovedAssignmentRow.active == True,
             ApprovedAssignmentRow.shift_date >= day - timedelta(days=1),
             ApprovedAssignmentRow.shift_date <= day + timedelta(days=1),
         )

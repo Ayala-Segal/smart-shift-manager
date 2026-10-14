@@ -32,6 +32,11 @@ def create_app():
             "connect_args": {"check_same_thread": False},
             "poolclass": StaticPool,
         }
+    else:
+        app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+            "pool_pre_ping": True,
+            "pool_recycle": 1800,
+        }
     app.config["MCP_TAVILY_API_KEY"] = os.environ.get("MCP_TAVILY_API_KEY", "")
     app.config["MCP_GMAIL_CREDENTIALS"] = os.environ.get("MCP_GMAIL_CREDENTIALS", "")
     app.config["VECTOR_STORE_PATH"] = os.environ.get("VECTOR_STORE_PATH", "instance/chroma")
@@ -69,6 +74,12 @@ def create_app():
     app.register_blueprint(notifications_bp, url_prefix="/notifications")
     app.register_blueprint(screens_bp)
     register_cli(app)
+
+    @app.context_processor
+    def inject_professional_roles():
+        from app.auth.models import PROFESSIONAL_ROLES
+
+        return {"professional_roles": PROFESSIONAL_ROLES}
 
     @app.get("/")
     def index():

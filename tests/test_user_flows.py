@@ -130,6 +130,38 @@ class UserFlowTests(unittest.TestCase):
         board = self.client.get("/queries/board?date=2026-10-19&mode=week&role=cashier")
         self.assertEqual(board.get_json()["shifts"][0]["waiting_candidates"], 2)
 
+    def test_shift_role_is_chosen_and_a_mismatch_is_blocked(self):
+        self._login("noa@example.com")
+        page = self.client.get("/shifts/new")
+        html = page.get_data(as_text=True)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('<select id="required_role"', html)
+        self.assertNotIn('<input id="required_role"', html)
+        for role_name in ("cashier", "shift lead", "representative"):
+            self.assertIn(role_name, html)
+        rejected = self.client.post(
+            "/commands/shifts",
+            json={
+                "shift_date": "2026-10-21",
+                "start_time": "09:00",
+                "end_time": "17:00",
+                "required_role": "baker",
+                "required_headcount": 1,
+            },
+        )
+        self.assertEqual(rejected.status_code, 400)
+        self.client.post("/auth/logout")
+        self._login("ayala@example.com")
+        listed = self.client.get("/queries/board?start=2026-10-20&end=2026-10-20")
+        shift_id = listed.get_json()["shifts"][0]["shift_id"]
+        card = self.client.get("/shifts/" + shift_id)
+        body = card.get_data(as_text=True)
+        self.assertIn("does not match", body)
+        self.assertNotIn("Submit request", body)
+        denied = self.client.post("/commands/assignments", json={"shift_id": shift_id})
+        self.assertEqual(denied.status_code, 400)
+        self.assertIn("does not match", denied.get_json()["error"])
+
     def _register(self, full_name, email, role, professional_role):
         response = self.client.post(
             "/auth/register",
@@ -151,3 +183,71 @@ class UserFlowTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.get_json())
         return response
+
+
+class SqlServerBooleanFilterTests(unittest.TestCase):
+    def test_boolean_filters_compile_as_equals_for_sql_server(self):
+        from pathlib import Path
+
+        from sqlalchemy.dialects import mssql
+
+        from app.auth.models import User
+        from app.read_models import ApprovedAssignmentRow
+
+        source = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (Path(__file__).resolve().parents[1] / "app").rglob("*.py")
+        )
+        self.assertNotIn(".is_(True)", source)
+        self.assertNotIn(".is_(False)", source)
+        dialect = mssql.dialect()
+        for expression in (ApprovedAssignmentRow.active == True, User.is_active == True):
+            sql = str(expression.compile(dialect=dialect, compile_kwargs={"literal_binds": True}))
+            self.assertNotIn("IS 1", sql)
+            self.assertIn("= 1", sql)
+
+    def test_employee_dashboard_lists_only_active_assignments(self):
+        from app.queries.dashboard import employee_dashboard
+        from app.read_models import ApprovedAssignmentRow
+
+        saved = os.environ.pop("SOMEE_SQLSERVER_CONNECTION_STRING", None)
+        app = create_app()
+        try:
+            with app.app_context():
+                db.create_all()
+                db.session.add(
+                    ApprovedAssignmentRow(
+                        assignment_id="keep",
+                        employee_id="emp-1",
+                        shift_id="shift-1",
+                        shift_date=date(2026, 10, 20),
+                        start_time="09:00",
+                        end_time="17:00",
+                        hours=8,
+                        active=True,
+                    )
+                )
+                db.session.add(
+                    ApprovedAssignmentRow(
+                        assignment_id="drop",
+                        employee_id="emp-1",
+                        shift_id="shift-2",
+                        shift_date=date(2026, 10, 21),
+                        start_time="09:00",
+                        end_time="17:00",
+                        hours=8,
+                        active=False,
+                    )
+                )
+                db.session.commit()
+                summary = employee_dashboard("emp-1", today=date(2026, 10, 14))
+                self.assertEqual(
+                    [row["shift_id"] for row in summary["approved_shifts"]],
+                    ["shift-1"],
+                )
+                db.session.remove()
+                db.drop_all()
+                db.engine.dispose()
+        finally:
+            if saved is not None:
+                os.environ["SOMEE_SQLSERVER_CONNECTION_STRING"] = saved

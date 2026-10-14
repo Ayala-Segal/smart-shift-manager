@@ -67,7 +67,7 @@ def employee_dashboard(employee_id, today=None):
         db.session.query(ApprovedAssignmentRow)
         .filter(
             ApprovedAssignmentRow.employee_id == employee_id,
-            ApprovedAssignmentRow.active.is_(True),
+            ApprovedAssignmentRow.active == True,
         )
         .order_by(ApprovedAssignmentRow.shift_date, ApprovedAssignmentRow.start_time)
         .all()
@@ -100,7 +100,7 @@ def my_approved_shifts(employee_id, today=None):
         db.session.query(ApprovedAssignmentRow)
         .filter(
             ApprovedAssignmentRow.employee_id == employee_id,
-            ApprovedAssignmentRow.active.is_(True),
+            ApprovedAssignmentRow.active == True,
             ApprovedAssignmentRow.shift_date >= current,
         )
         .order_by(ApprovedAssignmentRow.shift_date, ApprovedAssignmentRow.start_time)
@@ -135,7 +135,7 @@ def other_employees(user_id):
         db.session.query(User)
         .filter(
             User.role == ROLE_EMPLOYEE,
-            User.is_active.is_(True),
+            User.is_active == True,
             User.user_id != user_id,
         )
         .order_by(User.full_name)

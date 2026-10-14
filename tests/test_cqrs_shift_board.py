@@ -7,9 +7,10 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.pool import StaticPool
 
 from app.commands.define_shift import CommandRejected, define_shift
-from app.event_store import Event
+from app.event_store import ASSIGNMENT_APPROVED, AGGREGATE_ASSIGNMENT_REQUEST, Event, append_event
 from app.extensions import db, login_manager
 from app.projections import project_shift_board
+from app.read_models import ApprovedAssignmentRow, ShiftBoardRow
 from app.queries import queries_bp
 from app.queries.board import get_shift_board
 
@@ -67,6 +68,54 @@ class ShiftBoardCqrsTests(unittest.TestCase):
 
             response = self.app.test_client().get("/queries/board")
             self.assertEqual(response.status_code, 401)
+
+    def test_replaying_an_approved_assignment_does_not_insert_it_again(self):
+        with self.app.app_context():
+            shift = define_shift(
+                actor_id="manager-1",
+                actor_role="manager",
+                shift_date="2026-10-19",
+                start_time="08:00",
+                end_time="16:00",
+                required_role="cashier",
+                required_headcount=1,
+                today=date(2026, 10, 12),
+            )
+            project_shift_board()
+            approved = append_event(
+                aggregate_type=AGGREGATE_ASSIGNMENT_REQUEST,
+                aggregate_id="request-032fb226",
+                event_type=ASSIGNMENT_APPROVED,
+                payload={
+                    "shift_id": shift.aggregate_id,
+                    "shift_date": "2026-10-19",
+                    "start_time": "08:00",
+                    "end_time": "16:00",
+                    "employee_id": "employee-1",
+                    "manager_note": "",
+                },
+                actor_id="manager-1",
+            )
+            db.session.add(
+                ApprovedAssignmentRow(
+                    assignment_id=approved.aggregate_id,
+                    employee_id="employee-1",
+                    shift_id=shift.aggregate_id,
+                    shift_date=date(2026, 10, 19),
+                    start_time="08:00",
+                    end_time="16:00",
+                    hours=8,
+                    active=True,
+                )
+            )
+            db.session.commit()
+            project_shift_board()
+            board = db.session.get(ShiftBoardRow, shift.aggregate_id)
+            self.assertEqual(board.assigned_count, 0)
+            self.assertEqual(
+                db.session.query(ApprovedAssignmentRow).count(),
+                1,
+            )
 
     def test_rejected_command_stores_nothing(self):
         with self.app.app_context():

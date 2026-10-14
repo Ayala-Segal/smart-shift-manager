@@ -19,7 +19,7 @@ from app.event_store import (
     SWAP_REQUESTED,
     Event,
 )
-from app.extensions import db
+from app.extensions import db, run_once
 from app.read_models import (
     ApprovedAssignmentRow,
     AvailabilityConstraintRow,
@@ -41,8 +41,11 @@ STATUS_REJECTED = "Rejected"
 
 
 def ensure_read_models():
-    # A read left open on SQL Server blocks the next schema check and the page hangs.
-    db.session.rollback()
+    run_once("read_models_ready", _create_read_model_tables)
+    close_expired_shifts()
+
+
+def _create_read_model_tables():
     ShiftBoardRow.__table__.create(db.engine, checkfirst=True)
     ProjectorCheckpoint.__table__.create(db.engine, checkfirst=True)
     ShiftRequestRow.__table__.create(db.engine, checkfirst=True)
@@ -54,7 +57,6 @@ def ensure_read_models():
     EmployeeHoursRow.__table__.create(db.engine, checkfirst=True)
     ApprovedAssignmentRow.__table__.create(db.engine, checkfirst=True)
     RequestRecommendationRow.__table__.create(db.engine, checkfirst=True)
-    close_expired_shifts()
 
 
 def close_expired_shifts(today=None):
@@ -72,8 +74,6 @@ def close_expired_shifts(today=None):
         row.status = "closed"
     if rows:
         db.session.commit()
-    else:
-        db.session.rollback()
     return len(rows)
 
 
@@ -189,6 +189,8 @@ def _apply_assignment_approved(event):
     if shift is not None and shift.status == "cancelled":
         return
     _close_request(event.aggregate_id, STATUS_APPROVED, payload.get("manager_note") or "")
+    if db.session.get(ApprovedAssignmentRow, event.aggregate_id) is not None:
+        return
     shift_date = date.fromisoformat(payload["shift_date"])
     hours = duration_hours(payload["start_time"], payload["end_time"])
     row = ApprovedAssignmentRow(
@@ -275,7 +277,7 @@ def _apply_swap_approved(event):
         .filter(
             ApprovedAssignmentRow.employee_id == payload["employee_id"],
             ApprovedAssignmentRow.shift_id == payload["shift_id"],
-            ApprovedAssignmentRow.active.is_(True),
+            ApprovedAssignmentRow.active == True,
         )
         .first()
     )

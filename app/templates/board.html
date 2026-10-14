@@ -22,7 +22,12 @@
   <input id="end" name="end" type="date" value="{{ filters.get('end', '') }}">
   {% if not search %}
   <label for="role">Role</label>
-  <input id="role" name="role" value="{{ filters.get('role', '') }}">
+  <select id="role" name="role">
+    <option value="">Any</option>
+    {% for role_name in professional_roles %}
+    <option value="{{ role_name }}" {% if filters.get('role') == role_name %}selected{% endif %}>{{ role_name }}</option>
+    {% endfor %}
+  </select>
   <label for="status">Status</label>
   <select id="status" name="status">
     <option value="">Any</option>
