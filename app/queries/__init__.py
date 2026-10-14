@@ -7,6 +7,7 @@ from app.extensions import db
 from app.queries.board import (
     board_filters_from_request,
     get_shift_board,
+    recommendations_for,
     requests_for_shift,
     shift_board_payload,
     shift_detail_payload,
@@ -61,7 +62,12 @@ def shift_detail(shift_id):
     row = db.session.get(ShiftBoardRow, shift_id)
     if row is None:
         return jsonify({"error": "The shift does not exist."}), 404
-    return shift_detail_payload(row, requests_for_shift(shift_id), current_user)
+    return shift_detail_payload(
+        row,
+        requests_for_shift(shift_id),
+        current_user,
+        recommendations_for(shift_id),
+    )
 
 
 @queries_bp.post("/semantic-match")

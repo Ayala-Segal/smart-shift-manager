@@ -2,6 +2,7 @@ import json
 from datetime import date
 
 from app.event_store import (
+    AGENT_EVALUATION_COMPLETED,
     ASSIGNMENT_APPROVED,
     ASSIGNMENT_REQUESTED,
     AVAILABILITY_CONSTRAINT_SUBMITTED,
@@ -16,6 +17,7 @@ from app.read_models import (
     AvailabilityConstraintRow,
     EmployeeHoursRow,
     ProjectorCheckpoint,
+    RequestRecommendationRow,
     ShiftBoardRow,
     ShiftRequestRow,
 )
@@ -31,6 +33,7 @@ def ensure_read_models():
     AvailabilityConstraintRow.__table__.create(db.engine, checkfirst=True)
     EmployeeHoursRow.__table__.create(db.engine, checkfirst=True)
     ApprovedAssignmentRow.__table__.create(db.engine, checkfirst=True)
+    RequestRecommendationRow.__table__.create(db.engine, checkfirst=True)
 
 
 def project_shift_board():
@@ -57,6 +60,8 @@ def project_shift_board():
             _apply_assignment_approved(event)
         elif event.event_type == SHIFT_CANCELLED:
             _apply_shift_cancelled(event)
+        elif event.event_type == AGENT_EVALUATION_COMPLETED:
+            _apply_evaluation(event)
         if checkpoint is None:
             checkpoint = ProjectorCheckpoint(
                 projector_name=SHIFT_BOARD_PROJECTOR,
@@ -180,6 +185,20 @@ def _add_hours(employee_id, week_start, hours):
     row.approved_hours = round((row.approved_hours or 0) + hours, 2)
     if row.approved_hours <= 0:
         db.session.delete(row)
+
+
+def _apply_evaluation(event):
+    payload = json.loads(event.payload_json)
+    row = db.session.get(RequestRecommendationRow, event.aggregate_id)
+    if row is None:
+        row = RequestRecommendationRow(request_id=event.aggregate_id)
+        db.session.add(row)
+    row.shift_id = payload["shift_id"]
+    row.employee_id = payload["employee_id"]
+    row.request_type = payload["request_type"]
+    row.decision = payload["decision"]
+    row.rationale = payload["rationale"]
+    row.hours_warning = bool(payload.get("hours_warning"))
 
 
 def _refresh_status(row):

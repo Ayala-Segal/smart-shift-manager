@@ -60,6 +60,26 @@ class ApprovedAssignmentRow(db.Model):
     active = db.Column(db.Boolean, nullable=False, default=True)
 
 
+class RequestRecommendationRow(db.Model):
+    __tablename__ = "read_request_recommendations"
+
+    request_id = db.Column(db.String(64), primary_key=True)
+    shift_id = db.Column(db.String(64), nullable=False, index=True)
+    employee_id = db.Column(db.String(64), nullable=False)
+    request_type = db.Column(db.String(32), nullable=False)
+    decision = db.Column(db.String(16), nullable=False)
+    rationale = db.Column(db.String(500), nullable=False)
+    hours_warning = db.Column(db.Boolean, nullable=False)
+
+
+class EvaluationLock(db.Model):
+    __tablename__ = "evaluation_locks"
+
+    request_id = db.Column(db.String(64), primary_key=True)
+    run_id = db.Column(db.String(64), nullable=False)
+    locked_at = db.Column(db.DateTime, nullable=False)
+
+
 class AvailabilityConstraintRow(db.Model):
     __tablename__ = "read_availability_constraints"
 
