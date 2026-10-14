@@ -1,13 +1,18 @@
 import json
 from datetime import date
 
+from sqlalchemy import inspect, text
+
 from app.event_store import (
     AGENT_EVALUATION_COMPLETED,
     ASSIGNMENT_APPROVED,
+    ASSIGNMENT_REJECTED,
     ASSIGNMENT_REQUESTED,
     AVAILABILITY_CONSTRAINT_SUBMITTED,
     SHIFT_CANCELLED,
     SHIFT_DEFINED,
+    SWAP_APPROVED,
+    SWAP_REJECTED,
     SWAP_REQUESTED,
     Event,
 )
@@ -24,12 +29,17 @@ from app.read_models import (
 from app.tools.schedule import duration_hours, week_start_sunday
 
 SHIFT_BOARD_PROJECTOR = "shift_board"
+WAITING_FOR_AGENT = "Waiting for agent evaluation"
+WAITING_FOR_MANAGER = "Waiting for manager decision"
+STATUS_APPROVED = "Approved"
+STATUS_REJECTED = "Rejected"
 
 
 def ensure_read_models():
     ShiftBoardRow.__table__.create(db.engine, checkfirst=True)
     ProjectorCheckpoint.__table__.create(db.engine, checkfirst=True)
     ShiftRequestRow.__table__.create(db.engine, checkfirst=True)
+    _ensure_decision_note()
     AvailabilityConstraintRow.__table__.create(db.engine, checkfirst=True)
     EmployeeHoursRow.__table__.create(db.engine, checkfirst=True)
     ApprovedAssignmentRow.__table__.create(db.engine, checkfirst=True)
@@ -58,6 +68,12 @@ def project_shift_board():
             _apply_availability(event)
         elif event.event_type == ASSIGNMENT_APPROVED:
             _apply_assignment_approved(event)
+        elif event.event_type == ASSIGNMENT_REJECTED:
+            _apply_decision(event, STATUS_REJECTED)
+        elif event.event_type == SWAP_APPROVED:
+            _apply_swap_approved(event)
+        elif event.event_type == SWAP_REJECTED:
+            _apply_decision(event, STATUS_REJECTED)
         elif event.event_type == SHIFT_CANCELLED:
             _apply_shift_cancelled(event)
         elif event.event_type == AGENT_EVALUATION_COMPLETED:
@@ -105,6 +121,7 @@ def _apply_request(event, request_type):
         professional_role=payload.get("professional_role") or "",
         status=payload.get("status") or "Waiting for agent evaluation",
         note=payload.get("note") or "",
+        decision_note="",
         replacement_employee_id=payload.get("replacement_employee_id"),
         replacement_name=payload.get("replacement_name"),
     )
@@ -134,6 +151,7 @@ def _apply_assignment_approved(event):
     shift = db.session.get(ShiftBoardRow, payload.get("shift_id"))
     if shift is not None and shift.status == "cancelled":
         return
+    _close_request(event.aggregate_id, STATUS_APPROVED, payload.get("manager_note") or "")
     shift_date = date.fromisoformat(payload["shift_date"])
     hours = duration_hours(payload["start_time"], payload["end_time"])
     row = ApprovedAssignmentRow(
@@ -199,6 +217,84 @@ def _apply_evaluation(event):
     row.decision = payload["decision"]
     row.rationale = payload["rationale"]
     row.hours_warning = bool(payload.get("hours_warning"))
+    request_row = db.session.get(ShiftRequestRow, event.aggregate_id)
+    if request_row is not None and request_row.status == WAITING_FOR_AGENT:
+        request_row.status = WAITING_FOR_MANAGER
+
+
+def _apply_decision(event, status):
+    payload = json.loads(event.payload_json)
+    _close_request(event.aggregate_id, status, payload.get("manager_note") or "")
+
+
+def _apply_swap_approved(event):
+    payload = json.loads(event.payload_json)
+    shift = db.session.get(ShiftBoardRow, payload.get("shift_id"))
+    if shift is not None and shift.status == "cancelled":
+        return
+    original = (
+        db.session.query(ApprovedAssignmentRow)
+        .filter(
+            ApprovedAssignmentRow.employee_id == payload["employee_id"],
+            ApprovedAssignmentRow.shift_id == payload["shift_id"],
+            ApprovedAssignmentRow.active.is_(True),
+        )
+        .first()
+    )
+    shift_date = date.fromisoformat(payload["shift_date"])
+    hours = duration_hours(payload["start_time"], payload["end_time"])
+    if original is not None:
+        original.active = False
+        _add_hours(original.employee_id, week_start_sunday(original.shift_date), -original.hours)
+    db.session.add(
+        ApprovedAssignmentRow(
+            assignment_id=event.aggregate_id,
+            employee_id=payload["replacement_employee_id"],
+            shift_id=payload["shift_id"],
+            shift_date=shift_date,
+            start_time=payload["start_time"],
+            end_time=payload["end_time"],
+            hours=hours,
+            active=True,
+        )
+    )
+    _add_hours(payload["replacement_employee_id"], week_start_sunday(shift_date), hours)
+    if shift is not None and original is None:
+        shift.assigned_count = (shift.assigned_count or 0) + 1
+        _refresh_status(shift)
+    _close_request(event.aggregate_id, STATUS_APPROVED, payload.get("manager_note") or "")
+
+
+def _close_request(request_id, status, decision_note):
+    row = db.session.get(ShiftRequestRow, request_id)
+    if row is None:
+        return
+    was_waiting = row.status in {WAITING_FOR_AGENT, WAITING_FOR_MANAGER}
+    row.status = status
+    row.decision_note = (decision_note or "")[:300]
+    if was_waiting and row.request_type == "assignment":
+        shift = db.session.get(ShiftBoardRow, row.shift_id)
+        if shift is not None and shift.waiting_candidates:
+            shift.waiting_candidates -= 1
+
+
+def _ensure_decision_note():
+    columns = {column["name"] for column in inspect(db.engine).get_columns("read_shift_requests")}
+    if "decision_note" in columns:
+        return
+    if db.engine.dialect.name == "sqlite":
+        statement = (
+            "ALTER TABLE read_shift_requests "
+            "ADD COLUMN decision_note VARCHAR(300) NOT NULL DEFAULT ''"
+        )
+    else:
+        statement = (
+            "ALTER TABLE read_shift_requests "
+            "ADD decision_note VARCHAR(300) NOT NULL "
+            "CONSTRAINT DF_read_shift_requests_decision_note DEFAULT ''"
+        )
+    db.session.execute(text(statement))
+    db.session.commit()
 
 
 def _refresh_status(row):

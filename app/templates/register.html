@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% set title = "Create an account" %}
+{% block content %}
+<section class="panel narrow">
+  <h1>Create an account</h1>
+  <form method="post" action="{{ url_for('screens.register_submit') }}">
+    <label for="full_name">Full name</label>
+    <input id="full_name" name="full_name" value="{{ form.full_name }}" required>
+    {% if errors.full_name %}<p class="field-error">{{ errors.full_name }}</p>{% endif %}
+
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" value="{{ form.email }}" required>
+    {% if errors.email %}<p class="field-error">{{ errors.email }}</p>{% endif %}
+
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="new-password" required>
+    {% if errors.password %}<p class="field-error">{{ errors.password }}</p>{% endif %}
+
+    <label for="role">Role</label>
+    <select id="role" name="role">
+      <option value="employee" {% if form.role == "employee" %}selected{% endif %}>Employee</option>
+      <option value="manager" {% if form.role == "manager" %}selected{% endif %}>Manager</option>
+    </select>
+    {% if errors.role %}<p class="field-error">{{ errors.role }}</p>{% endif %}
+
+    <label for="professional_role">Professional role</label>
+    <input id="professional_role" name="professional_role" value="{{ form.professional_role }}">
+    {% if errors.professional_role %}<p class="field-error">{{ errors.professional_role }}</p>{% endif %}
+
+    <button type="submit">Create account</button>
+  </form>
+  <p class="hint"><a href="{{ url_for('screens.sign_in') }}">Sign in</a></p>
+</section>
+{% endblock %}

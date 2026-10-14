@@ -1,8 +1,8 @@
 from datetime import date, timedelta
 
-from app.auth.models import ROLE_EMPLOYEE
+from app.auth.models import ROLE_EMPLOYEE, User
 from app.extensions import db
-from app.read_models import RequestRecommendationRow, ShiftBoardRow, ShiftRequestRow
+from app.read_models import ApprovedAssignmentRow, RequestRecommendationRow, ShiftBoardRow, ShiftRequestRow
 
 OPEN_STATUSES = ("open", "partial")
 
@@ -98,7 +98,39 @@ def shift_detail_payload(row, requests, viewer, recommendations=None):
             entry["rationale"] = recommendation.rationale
             entry["hours_warning"] = recommendation.hours_warning
         visible.append(entry)
-    return {"shift": _shift_summary(row), "registered": visible}
+    return {
+        "shift": _shift_summary(row),
+        "registered": visible,
+        "assignees": _assignees(row.shift_id, viewer),
+    }
+
+
+def _assignees(shift_id, viewer):
+    rows = (
+        db.session.query(ApprovedAssignmentRow)
+        .filter(
+            ApprovedAssignmentRow.shift_id == shift_id,
+            ApprovedAssignmentRow.active.is_(True),
+        )
+        .order_by(ApprovedAssignmentRow.employee_id)
+        .all()
+    )
+    visible = []
+    for row in rows:
+        user = db.session.get(User, row.employee_id)
+        name = user.full_name if user is not None else "Unknown"
+        role = user.professional_role if user is not None else ""
+        if viewer.role == ROLE_EMPLOYEE:
+            visible.append({"first_name": name.split()[0], "professional_role": role})
+        else:
+            visible.append(
+                {
+                    "employee_id": row.employee_id,
+                    "full_name": name,
+                    "professional_role": role,
+                }
+            )
+    return visible
 
 
 def _can_see_recommendation(viewer, request_row):

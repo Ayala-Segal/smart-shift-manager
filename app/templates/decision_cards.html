@@ -1,0 +1,30 @@
+{% if not decisions %}
+<p class="empty">No requests are waiting for a decision.</p>
+{% else %}
+<div class="cards">
+  {% for item in decisions %}
+  <article class="card">
+    <header>
+      <h2>{{ item.full_name }}</h2>
+      <p class="meta">{{ item.request_type }} · {{ item.weekday }} {{ item.shift_date }} {{ item.start_time }}–{{ item.end_time }} · {{ item.required_role }}</p>
+      {% if item.replacement_name %}
+      <p class="meta">Replacement: {{ item.replacement_name }}</p>
+      {% endif %}
+    </header>
+    <p><span class="pill {{ item.recommendation }}">{{ item.recommendation }}</span>
+      {% if item.hours_warning %}<span class="pill warning">hours warning</span>{% endif %}
+    </p>
+    <p>{{ item.rationale }}</p>
+    <form method="post" action="{{ url_for('screens.decide', request_id=item.request_id) }}" class="decision">
+      <button type="submit" name="action" value="approve">Approve</button>
+      <label for="note-{{ item.request_id }}">Rejection note</label>
+      <input id="note-{{ item.request_id }}" name="note" maxlength="300">
+      {% if failed_id == item.request_id and field_error %}
+      <p class="field-error">{{ field_error }}</p>
+      {% endif %}
+      <button type="submit" name="action" value="reject" class="secondary">Reject</button>
+    </form>
+  </article>
+  {% endfor %}
+</div>
+{% endif %}

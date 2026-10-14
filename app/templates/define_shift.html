@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% set title = "Define a shift" %}
+{% block content %}
+<section class="panel">
+  <h1>Define a shift</h1>
+  {% if error %}<p class="field-error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="{{ url_for('screens.create_shift') }}">
+    <label for="shift_date">Date</label>
+    <input id="shift_date" name="shift_date" type="date" value="{{ form.shift_date or '' }}" required>
+    {% if errors.shift_date %}<p class="field-error">{{ errors.shift_date }}</p>{% endif %}
+
+    <label for="start_time">Start</label>
+    <input id="start_time" name="start_time" type="time" value="{{ form.start_time or '' }}" required>
+    {% if errors.start_time %}<p class="field-error">{{ errors.start_time }}</p>{% endif %}
+
+    <label for="end_time">End</label>
+    <input id="end_time" name="end_time" type="time" value="{{ form.end_time or '' }}" required>
+
+    <label class="check" for="crosses_midnight">
+      <input id="crosses_midnight" name="crosses_midnight" type="checkbox" value="yes" {% if form.crosses_midnight %}checked{% endif %}>
+      Crosses midnight
+    </label>
+
+    <label for="required_role">Role</label>
+    <input id="required_role" name="required_role" value="{{ form.required_role or '' }}" required>
+    {% if errors.required_role %}<p class="field-error">{{ errors.required_role }}</p>{% endif %}
+
+    <label for="required_headcount">Required headcount</label>
+    <input id="required_headcount" name="required_headcount" type="number" min="1" value="{{ form.required_headcount or '' }}" required>
+    {% if errors.required_headcount %}<p class="field-error">{{ errors.required_headcount }}</p>{% endif %}
+
+    <label for="note">Note</label>
+    <textarea id="note" name="note" maxlength="300">{{ form.note or '' }}</textarea>
+    {% if errors.note %}<p class="field-error">{{ errors.note }}</p>{% endif %}
+
+    <button type="submit">Save shift</button>
+  </form>
+</section>
+{% endblock %}

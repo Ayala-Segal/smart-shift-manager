@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% set title = "My shifts" %}
+{% block content %}
+<h1>My shifts</h1>
+<p class="meta">Week {{ summary.week_start }} to {{ summary.week_end }}</p>
+<p class="hours">Approved hours this week: <strong>{{ summary.approved_hours }}</strong></p>
+
+<h2>Approved shifts</h2>
+{% if summary.approved_shifts %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Hours</th><th>Role</th></tr>
+    </thead>
+    <tbody>
+      {% for shift in summary.approved_shifts %}
+      <tr>
+        <td><a href="{{ url_for('screens.shift_card', shift_id=shift.shift_id) }}">{{ shift.weekday }} {{ shift.shift_date }}</a></td>
+        <td>{{ shift.start_time }}–{{ shift.end_time }}</td>
+        <td>{{ shift.required_role }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="empty">No approved shifts this week.</p>
+{% endif %}
+
+<h2>Open requests</h2>
+{% if summary.open_requests %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Request</th><th>Shift</th><th>Type</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      {% for item in summary.open_requests %}
+      <tr>
+        <td>{{ item.request_id }}</td>
+        <td>{{ item.shift_date }} {{ item.start_time }}–{{ item.end_time }}</td>
+        <td>{{ item.request_type }}</td>
+        <td>{{ item.status }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="empty">No open requests.</p>
+{% endif %}
+
+{% if summary.decided_requests %}
+<h2>Decided requests</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Request</th><th>Shift</th><th>Status</th><th>Note</th></tr>
+    </thead>
+    <tbody>
+      {% for item in summary.decided_requests %}
+      <tr>
+        <td>{{ item.request_id }}</td>
+        <td>{{ item.shift_date }} {{ item.start_time }}–{{ item.end_time }}</td>
+        <td>{{ item.status }}</td>
+        <td>{{ item.decision_note }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}
