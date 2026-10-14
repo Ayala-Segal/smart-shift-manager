@@ -17,6 +17,8 @@ class User(UserMixin, db.Model):
     role = db.Column(db.String(16), nullable=False)
     professional_role = db.Column(db.String(64), nullable=False, default="")
     is_active = db.Column(db.Boolean, nullable=False, default=True)
+    locality = db.Column(db.String(80), nullable=False, default="Israel")
+    notify_email = db.Column(db.Boolean, nullable=False, default=True)
 
     def get_id(self):
         return self.user_id

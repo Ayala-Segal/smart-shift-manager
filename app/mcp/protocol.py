@@ -91,5 +91,41 @@ def _tool_definitions():
     ]
 
 
+def dispatch_external(message, server_name, definitions, caller):
+    """MCP handler for a server that is not the in-app shift-tool server."""
+    method = message.get("method")
+    if method and str(method).startswith("notifications/"):
+        return None
+    request_id = message.get("id")
+    if method == "initialize":
+        return _result(
+            request_id,
+            {
+                "protocolVersion": PROTOCOL_VERSION,
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": server_name, "version": "1.0.0"},
+            },
+        )
+    if method == "tools/list":
+        return _result(request_id, {"tools": definitions})
+    if method == "tools/call":
+        params = message.get("params") or {}
+        envelope = caller(params.get("name"), params.get("arguments") or {})
+        return _result(
+            request_id,
+            {
+                "content": [{"type": "text", "text": json.dumps(envelope)}],
+                "isError": "error_code" in envelope and not envelope.get("ok", False),
+            },
+        )
+    if request_id is None:
+        return None
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "error": {"code": -32601, "message": "Method not found"},
+    }
+
+
 def _result(request_id, result):
     return {"jsonrpc": "2.0", "id": request_id, "result": result}

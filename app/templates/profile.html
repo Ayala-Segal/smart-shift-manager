@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% set title = "Profile" %}
+{% block content %}
+<section class="panel narrow">
+  <p class="eyebrow">Signed in as</p>
+  <h1>{{ current_user.full_name }}</h1>
+  <p class="account-email">{{ current_user.email }}</p>
+  <p class="hint">This email is the account name. It stays the same when you edit the profile.</p>
+  <form method="post" action="{{ url_for('screens.update_profile_screen') }}">
+    <h2>Profile</h2>
+    <label for="full_name">Full name</label>
+    <input id="full_name" name="full_name" value="{{ current_user.full_name }}" required>
+    {% if errors.full_name %}<p class="field-error">{{ errors.full_name }}</p>{% endif %}
+    <label for="professional_role">Professional role</label>
+    <input id="professional_role" name="professional_role" value="{{ current_user.professional_role }}">
+    {% if errors.professional_role %}<p class="field-error">{{ errors.professional_role }}</p>{% endif %}
+
+    <h2>System settings</h2>
+    <label for="locality">Locality for holiday and event checks</label>
+    <input id="locality" name="locality" value="{{ current_user.locality or 'Israel' }}">
+    {% if errors.locality %}<p class="field-error">{{ errors.locality }}</p>{% endif %}
+    <label class="check" for="notify_email">
+      <input id="notify_email" name="notify_email" type="checkbox" value="yes" {% if current_user.notify_email %}checked{% endif %}>
+      Email me when a decision affects my shifts
+    </label>
+
+    <h2>Password</h2>
+    <label for="current_password">Current password</label>
+    <input id="current_password" name="current_password" type="password" autocomplete="current-password">
+    {% if errors.current_password %}<p class="field-error">{{ errors.current_password }}</p>{% endif %}
+    <label for="new_password">New password</label>
+    <input id="new_password" name="new_password" type="password" autocomplete="new-password">
+    {% if errors.new_password %}<p class="field-error">{{ errors.new_password }}</p>{% endif %}
+    <p class="hint">Leave both password fields empty to keep the current password.</p>
+    <button type="submit">Save profile</button>
+  </form>
+</section>
+{% endblock %}

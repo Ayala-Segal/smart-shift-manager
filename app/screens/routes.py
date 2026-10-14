@@ -1,29 +1,48 @@
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from functools import wraps
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import Response, current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_user, logout_user
 
-from app.auth.models import ROLE_EMPLOYEE, ROLE_MANAGER
-from app.auth.service import SIGN_IN_FAILED, RegistrationError, authenticate, register_user
+from app.agent.cycle import run_evaluation_cycle
+from app.auth.models import ROLE_EMPLOYEE, ROLE_MANAGER, User
+from app.auth.service import SIGN_IN_FAILED, RegistrationError, authenticate, register_user, update_profile
 from app.commands.decide_request import decide_request
 from app.commands.define_shift import CommandRejected, define_shift
-from app.commands.submit_requests import request_assignment, request_swap, submit_availability
-from app.event_store import ASSIGNMENT_APPROVED, SWAP_APPROVED
+from app.commands.submit_requests import (
+    register_employee,
+    request_assignment,
+    request_swap,
+    respond_to_swap,
+    submit_availability,
+)
+from app.event_store import ASSIGNMENT_APPROVED, ASSIGNMENT_REQUESTED, SWAP_APPROVED, SWAP_COLLEAGUE_APPROVED
 from app.extensions import db
 from app.notifications.dispatch import dispatch_notifications
-from app.projections import WAITING_FOR_AGENT, project_shift_board
-from app.queries.board import board_filters_from_request, get_shift_board, recommendations_for, requests_for_shift, shift_detail_payload
+from app.projections import project_shift_board
+from app.queries.board import (
+    board_filters_from_request,
+    get_shift_board,
+    recommendations_for,
+    requests_for_shift,
+    shift_detail_payload,
+    shift_report_csv,
+)
 from app.queries.dashboard import (
     constraints_for,
     employee_dashboard,
+    employees_directory,
+    incoming_swaps,
     manager_dashboard_summary,
     my_approved_shifts,
     other_employees,
     pending_decisions,
 )
-from app.read_models import ShiftBoardRow
+from app.read_models import ShiftBoardRow, ShiftRequestRow
 from app.screens import screens_bp
+
+ISRAEL = ZoneInfo("Asia/Jerusalem")
 
 
 def screen_role(*roles):
@@ -91,14 +110,10 @@ def sign_out():
 @screens_bp.get("/manager")
 @screen_role(ROLE_MANAGER)
 def manager_home():
+    _settle_agent()
     start, end, error = _optional_range()
     summary = manager_dashboard_summary(start=start, end=end) if error is None else None
-    decisions = []
-    if summary is not None:
-        decisions = pending_decisions(
-            start=date.fromisoformat(summary["start"]),
-            end=date.fromisoformat(summary["end"]),
-        )
+    decisions = pending_decisions() if summary is not None else []
     return render_template(
         "manager_dashboard.html",
         summary=summary,
@@ -119,6 +134,22 @@ def board():
 @screen_role(ROLE_EMPLOYEE)
 def search():
     return _board_page(search=True)
+
+
+@screens_bp.get("/board/export")
+@screen_role(ROLE_MANAGER, ROLE_EMPLOYEE)
+def export_board():
+    args = request.args.to_dict(flat=True)
+    try:
+        filters = board_filters_from_request(args, current_user)
+        rows = get_shift_board(**filters)
+    except ValueError as error:
+        return Response(str(error), status=400, mimetype="text/plain")
+    return Response(
+        shift_report_csv(rows),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=shift-report.csv"},
+    )
 
 
 @screens_bp.get("/shifts/new")
@@ -176,6 +207,7 @@ def create_shift():
 @screens_bp.get("/shifts/<shift_id>")
 @screen_role(ROLE_MANAGER, ROLE_EMPLOYEE)
 def shift_card(shift_id):
+    _settle_agent()
     row = db.session.get(ShiftBoardRow, shift_id)
     if row is None:
         return render_template("forbidden.html", message="The shift does not exist."), 404
@@ -185,7 +217,12 @@ def shift_card(shift_id):
         current_user,
         recommendations_for(shift_id),
     )
-    return render_template("shift_card.html", detail=detail, error="")
+    return render_template(
+        "shift_card.html",
+        detail=detail,
+        error="",
+        candidates=_matching_employees(row.required_role),
+    )
 
 
 @screens_bp.post("/shifts/<shift_id>/request")
@@ -209,15 +246,58 @@ def request_shift(shift_id):
             current_user,
             recommendations_for(shift_id),
         )
-        return render_template("shift_card.html", detail=detail, error=str(error)), 400
+        return render_template(
+            "shift_card.html",
+            detail=detail,
+            error=str(error),
+            candidates=_matching_employees(row.required_role),
+        ), 400
     project_shift_board()
-    flash("Request {0} is {1}.".format(event.aggregate_id, WAITING_FOR_AGENT))
+    if event.event_type == ASSIGNMENT_REQUESTED:
+        _settle_agent()
+    _flash_request(event)
     return redirect(url_for("screens.shift_card", shift_id=shift_id))
+
+
+@screens_bp.post("/shifts/<shift_id>/register")
+@screen_role(ROLE_MANAGER)
+def register_for_shift(shift_id):
+    employee_id = request.form.get("employee_id") or ""
+    note = request.form.get("note") or ""
+    try:
+        event = register_employee(
+            actor_id=current_user.user_id,
+            actor_role=current_user.role,
+            shift_id=shift_id,
+            employee_id=employee_id,
+            note=note,
+        )
+    except CommandRejected as error:
+        row = db.session.get(ShiftBoardRow, shift_id)
+        if row is None:
+            return render_template("forbidden.html", message="The shift does not exist."), 404
+        detail = shift_detail_payload(
+            row,
+            requests_for_shift(shift_id),
+            current_user,
+            recommendations_for(shift_id),
+        )
+        return render_template(
+            "shift_card.html",
+            detail=detail,
+            error=str(error),
+            candidates=_matching_employees(row.required_role),
+        ), 400
+    project_shift_board()
+    _settle_agent()
+    _flash_request(event)
+    return redirect(url_for("screens.decisions"))
 
 
 @screens_bp.get("/decisions")
 @screen_role(ROLE_MANAGER)
 def decisions():
+    _settle_agent()
     return render_template(
         "decisions.html",
         decisions=pending_decisions(),
@@ -345,14 +425,110 @@ def request_swap_screen():
             form=form,
         ), 400
     project_shift_board()
-    flash("Request {0} is {1}.".format(event.aggregate_id, WAITING_FOR_AGENT))
+    _flash_request(event)
     return redirect(url_for("screens.my_home"))
+
+
+@screens_bp.get("/swap-approvals")
+@screen_role(ROLE_EMPLOYEE)
+def swap_approvals():
+    return render_template(
+        "swap_approvals.html",
+        swaps=incoming_swaps(current_user.user_id),
+        error="",
+    )
+
+
+@screens_bp.post("/swap-approvals/<request_id>")
+@screen_role(ROLE_EMPLOYEE)
+def respond_swap(request_id):
+    action = request.form.get("action") or ""
+    try:
+        event = respond_to_swap(
+            actor_id=current_user.user_id,
+            actor_role=current_user.role,
+            request_id=request_id,
+            action=action,
+        )
+    except CommandRejected as error:
+        return render_template(
+            "swap_approvals.html",
+            swaps=incoming_swaps(current_user.user_id),
+            error=str(error),
+        ), 400
+    project_shift_board()
+    if event.event_type == SWAP_COLLEAGUE_APPROVED:
+        _settle_agent()
+    _flash_request(event)
+    return redirect(url_for("screens.swap_approvals"))
+
+
+@screens_bp.get("/employees")
+@screen_role(ROLE_MANAGER)
+def employees():
+    return render_template("employees.html", employees=employees_directory())
+
+
+@screens_bp.get("/profile")
+@screen_role(ROLE_MANAGER, ROLE_EMPLOYEE)
+def profile():
+    return render_template("profile.html", errors={}, saved=False)
+
+
+@screens_bp.post("/profile")
+@screen_role(ROLE_MANAGER, ROLE_EMPLOYEE)
+def update_profile_screen():
+    try:
+        update_profile(
+            current_user,
+            full_name=request.form.get("full_name") or "",
+            professional_role=request.form.get("professional_role") or "",
+            locality=request.form.get("locality") or "",
+            notify_email=request.form.get("notify_email") == "yes",
+            current_password=request.form.get("current_password") or "",
+            new_password=request.form.get("new_password") or "",
+        )
+    except RegistrationError as error:
+        return render_template("profile.html", errors=error.errors, saved=False), 400
+    flash("Profile saved.")
+    return redirect(url_for("screens.profile"))
+
+
+def _settle_agent():
+    try:
+        run_evaluation_cycle(current_app._get_current_object())
+    except Exception as error:
+        db.session.rollback()
+        print("agent cycle failed: {0}".format(error), flush=True)
+
+
+def _matching_employees(required_role):
+    return (
+        db.session.query(User)
+        .filter(
+            User.role == ROLE_EMPLOYEE,
+            User.is_active.is_(True),
+            User.professional_role == required_role,
+        )
+        .order_by(User.full_name)
+        .all()
+    )
+
+
+def _flash_request(event):
+    row = db.session.get(ShiftRequestRow, event.aggregate_id)
+    if row is not None and row.display_number is not None:
+        label = "#{0}".format(row.display_number)
+    else:
+        label = event.aggregate_id
+    status = row.status if row is not None else "Waiting for agent evaluation"
+    flash("Request {0} is {1}.".format(label, status))
 
 
 def _board_page(search):
     args = request.args.to_dict(flat=True)
     if search:
-        args["open_only"] = "1"
+        args["include_closed"] = "1"
     try:
         filters = board_filters_from_request(args, current_user)
         rows = get_shift_board(**filters)
@@ -360,20 +536,33 @@ def _board_page(search):
         return render_template(
             "board.html",
             shifts=[],
+            past_shifts=[],
             message="",
             error=str(error),
             search=search,
             filters=args,
+            export_url=_export_url(args),
         ), 400
-    message = "" if rows else "No shifts in the selected range"
+    today = datetime.now(ISRAEL).date()
+    past_shifts = [row for row in rows if row.shift_date < today or row.status == "closed"]
+    rows = [row for row in rows if row.shift_date >= today and row.status != "closed"]
+    message = "" if rows or past_shifts else "No shifts in the selected range"
     return render_template(
         "board.html",
         shifts=rows,
+        past_shifts=past_shifts,
         message=message,
         error="",
         search=search,
         filters=args,
+        export_url=_export_url(args),
     )
+
+
+def _export_url(args):
+    allowed = ("mode", "date", "start", "end", "role", "status", "include_closed", "open_only")
+    query = {key: args[key] for key in allowed if args.get(key)}
+    return url_for("screens.export_board", **query)
 
 
 def _optional_range():

@@ -5,7 +5,7 @@
 <p class="meta">Week {{ summary.week_start }} to {{ summary.week_end }}</p>
 <p class="hours">Approved hours this week: <strong>{{ summary.approved_hours }}</strong></p>
 
-<h2>Approved shifts</h2>
+<h2>Upcoming shifts</h2>
 {% if summary.approved_shifts %}
 <div class="table-wrap">
   <table>
@@ -24,7 +24,29 @@
   </table>
 </div>
 {% else %}
-<p class="empty">No approved shifts this week.</p>
+<p class="empty">No upcoming shifts.</p>
+{% endif %}
+
+<h2>Past shifts</h2>
+{% if summary.past_shifts %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Hours</th><th>Role</th></tr>
+    </thead>
+    <tbody>
+      {% for shift in summary.past_shifts %}
+      <tr>
+        <td><a href="{{ url_for('screens.shift_card', shift_id=shift.shift_id) }}">{{ shift.weekday }} {{ shift.shift_date }}</a></td>
+        <td>{{ shift.start_time }}–{{ shift.end_time }}</td>
+        <td>{{ shift.required_role }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="empty">No past shifts.</p>
 {% endif %}
 
 <h2>Open requests</h2>
@@ -37,7 +59,7 @@
     <tbody>
       {% for item in summary.open_requests %}
       <tr>
-        <td>{{ item.request_id }}</td>
+        <td>#{{ item.display_number if item.display_number is not none else item.request_id }}</td>
         <td>{{ item.shift_date }} {{ item.start_time }}–{{ item.end_time }}</td>
         <td>{{ item.request_type }}</td>
         <td>{{ item.status }}</td>
@@ -60,7 +82,7 @@
     <tbody>
       {% for item in summary.decided_requests %}
       <tr>
-        <td>{{ item.request_id }}</td>
+        <td>#{{ item.display_number if item.display_number is not none else item.request_id }}</td>
         <td>{{ item.shift_date }} {{ item.start_time }}–{{ item.end_time }}</td>
         <td>{{ item.status }}</td>
         <td>{{ item.decision_note }}</td>

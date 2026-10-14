@@ -38,6 +38,7 @@ class ShiftRequestRow(db.Model):
     decision_note = db.Column(db.String(300), nullable=False, default="")
     replacement_employee_id = db.Column(db.String(64), nullable=True)
     replacement_name = db.Column(db.String(120), nullable=True)
+    display_number = db.Column(db.Integer, nullable=True)
 
 
 class EmployeeHoursRow(db.Model):
@@ -71,6 +72,7 @@ class RequestRecommendationRow(db.Model):
     decision = db.Column(db.String(16), nullable=False)
     rationale = db.Column(db.String(500), nullable=False)
     hours_warning = db.Column(db.Boolean, nullable=False)
+    sources_json = db.Column(db.Text, nullable=True)
 
 
 class EvaluationLock(db.Model):

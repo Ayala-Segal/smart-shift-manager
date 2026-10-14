@@ -5,7 +5,12 @@ from app.auth.guards import role_required
 from app.auth.models import ROLE_EMPLOYEE, ROLE_MANAGER
 from app.commands.decide_request import decide_request
 from app.commands.define_shift import CommandRejected, define_shift
-from app.commands.submit_requests import request_assignment, request_swap, submit_availability
+from app.commands.submit_requests import (
+    request_assignment,
+    request_swap,
+    respond_to_swap,
+    submit_availability,
+)
 from app.event_store import ASSIGNMENT_APPROVED, SWAP_APPROVED
 from app.notifications.dispatch import dispatch_notifications
 from app.projections import project_shift_board
@@ -97,6 +102,28 @@ def assignment_decision(request_id):
     return _decide(request_id, "assignment")
 
 
+@commands_bp.post("/swaps/<request_id>/colleague")
+@role_required(ROLE_EMPLOYEE)
+def swap_colleague(request_id):
+    body = request.get_json(silent=True) or {}
+    try:
+        event = respond_to_swap(
+            actor_id=current_user.user_id,
+            actor_role=current_user.role,
+            request_id=request_id,
+            action=body.get("action"),
+        )
+    except CommandRejected as error:
+        return jsonify({"error": str(error)}), 400
+    project_shift_board()
+    status = (
+        "Waiting for agent evaluation"
+        if event.event_type == "SwapColleagueApproved"
+        else "Rejected"
+    )
+    return jsonify({"request_id": event.aggregate_id, "status": status}), 201
+
+
 @commands_bp.post("/swaps/<request_id>/decision")
 @role_required(ROLE_MANAGER)
 def swap_decision(request_id):
@@ -150,4 +177,10 @@ def _submit(command):
     except CommandRejected as error:
         return jsonify({"error": str(error)}), 400
     project_shift_board()
-    return jsonify({"request_id": event.aggregate_id, "status": WAITING}), 201
+    import json
+
+    payload = json.loads(event.payload_json)
+    body = {"request_id": event.aggregate_id, "status": payload.get("status") or WAITING}
+    if payload.get("display_number") is not None:
+        body["display_number"] = payload["display_number"]
+    return jsonify(body), 201

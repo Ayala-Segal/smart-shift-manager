@@ -4,6 +4,7 @@ import subprocess
 import sys
 import unittest
 from datetime import date
+from unittest.mock import patch
 
 from app import create_app
 from app.commands.define_shift import define_shift
@@ -122,6 +123,23 @@ class McpToolTests(unittest.TestCase):
         self.assertEqual(found["result"]["kind"], "holiday")
         self.assertEqual(found["result"]["source"], "https://example.com/holiday")
         self.assertEqual(search_date_context("2026-10-19")["error_code"], "not_configured")
+        os.environ["MCP_TAVILY_API_KEY"] = "test-key"
+        with patch(
+            "app.mcp.stdio.call_tool",
+            return_value={
+                "results": [
+                    {
+                        "title": "Holiday eve",
+                        "url": "https://example.com/holiday",
+                        "content": "A public holiday",
+                    }
+                ],
+            },
+        ) as called:
+            through_mcp = search_date_context("2026-10-19")
+        self.assertEqual(called.call_args.args[1], "tavily_search")
+        self.assertTrue(through_mcp["result"]["found"])
+        os.environ.pop("MCP_TAVILY_API_KEY", None)
 
         registered = self.client.post(
             "/auth/register",
@@ -281,6 +299,55 @@ class McpToolTests(unittest.TestCase):
         self.assertEqual(initialized["result"]["serverInfo"]["name"], "smart-shift-tools")
         names = [tool["name"] for tool in listed["result"]["tools"]]
         self.assertIn("check_availability_conflicts", names)
+        self._assert_external_server_lists_tool("tavily_mcp_server.py", "tavily", "tavily_search")
+        self._assert_external_server_lists_tool("gmail_mcp_server.py", "gmail", "send_email")
+
+    def _assert_external_server_lists_tool(self, script, server_name, tool_name):
+        env = os.environ.copy()
+        env["SOMEE_SQLSERVER_CONNECTION_STRING"] = ""
+        env["MCP_TAVILY_API_KEY"] = ""
+        env["MCP_GMAIL_CREDENTIALS"] = ""
+        env["MCP_GMAIL_COMMAND"] = ""
+        process = subprocess.Popen(
+            [sys.executable, script],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+        try:
+            write_message(
+                process.stdin,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "test", "version": "1.0.0"},
+                    },
+                },
+            )
+            initialized = read_message(process.stdout)
+            write_message(
+                process.stdin,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {"name": tool_name, "arguments": {"query": "holidays", "to": "a@b.c", "subject": "Hi", "body": "Hello"}},
+                },
+            )
+            called = read_message(process.stdout)
+        finally:
+            process.kill()
+            process.wait(timeout=5)
+            for stream in (process.stdin, process.stdout, process.stderr):
+                stream.close()
+        self.assertEqual(initialized["result"]["serverInfo"]["name"], server_name)
+        body = json.loads(called["result"]["content"][0]["text"])
+        self.assertEqual(body["error_code"], "not_configured")
 
     def _restore(self, name, value):
         if value is None:

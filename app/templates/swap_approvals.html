@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% set title = "Swap approvals" %}
+{% block content %}
+<section class="panel">
+  <h1>Swap approvals</h1>
+  <p class="hint">Another employee asked to swap a shift with you. Your approval comes first. The manager decides after that.</p>
+  {% if error %}<p class="field-error" role="alert">{{ error }}</p>{% endif %}
+  {% if not swaps %}
+  <p class="empty">No swap requests are waiting for you.</p>
+  {% else %}
+  <div class="cards">
+    {% for item in swaps %}
+    <article class="card">
+      <p class="request-no">Request #{% if item.display_number is not none %}{{ item.display_number }}{% else %}{{ item.request_id }}{% endif %}</p>
+      <h2>{{ item.full_name }}</h2>
+      <p class="meta">{{ item.shift_date }} {{ item.start_time }}–{{ item.end_time }}</p>
+      {% if item.note %}<p>{{ item.note }}</p>{% endif %}
+      <form method="post" action="{{ url_for('screens.respond_swap', request_id=item.request_id) }}" class="decision">
+        <button type="submit" name="action" value="approve">Approve swap</button>
+        <button type="submit" name="action" value="reject" class="secondary">Decline</button>
+      </form>
+    </article>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -11,6 +11,7 @@ from app.auth.models import User
 from app.event_store import (
     AGENT_EVALUATION_COMPLETED,
     ASSIGNMENT_REQUESTED,
+    SWAP_COLLEAGUE_APPROVED,
     SWAP_REQUESTED,
     Event,
     append_event,
@@ -47,6 +48,7 @@ def run_evaluation_cycle(
     evaluated = 0
     with app.app_context():
         ensure_read_models()
+        db.session.rollback()
         EvaluationLock.__table__.create(db.engine, checkfirst=True)
         for request in _pending_requests():
             if not _claim(request["request_id"], run_id):
@@ -60,8 +62,12 @@ def run_evaluation_cycle(
                     search=search,
                     retrieve=retrieve,
                 )
-            except Exception:
+            except Exception as error:
                 db.session.rollback()
+                print(
+                    "agent evaluation failed for {0}: {1}".format(request["request_id"], error),
+                    flush=True,
+                )
                 _release(request["request_id"], run_id)
                 continue
             if outcome is None:
@@ -102,8 +108,19 @@ def _evaluate_one(app, request, *, availability, weekly_hours, search, retrieve)
         shift_hours,
     )
     if not conflict.get("ok") or not hours.get("ok"):
-        return None
-    tavily = search(shift.shift_date.isoformat())
+        choice = {
+            "decision": "warning",
+            "rationale": (
+                "Scheduling checks did not finish. "
+                "A manager still needs to decide this request."
+            ),
+            "hours_warning": False,
+        }
+        sources = [{"name": "tools", "ok": False}]
+        return _store_evaluation(request, shift, subject_id, choice, sources)
+    person = db.session.get(User, subject_id)
+    locality = (getattr(person, "locality", None) or "Israel").strip() or "Israel"
+    tavily = _call_search(search, shift.shift_date.isoformat(), locality)
     retrieval_ok, passage_count = _passages(app, retrieve, subject_id, shift)
     choice = decide(
         role_matches=role_name == shift.required_role,
@@ -113,9 +130,20 @@ def _evaluate_one(app, request, *, availability, weekly_hours, search, retrieve)
         retrieval_ok=retrieval_ok,
         shift_hours=shift_hours,
     )
+    sources = _sources(
+        conflict,
+        hours,
+        tavily,
+        retrieval_ok,
+        passage_count,
+        _recent_assignments(subject_id, shift.shift_date),
+    )
+    return _store_evaluation(request, shift, subject_id, choice, sources)
+
+
+def _store_evaluation(request, shift, subject_id, choice, sources):
     if _already_evaluated(request["request_id"]):
         return None
-    history = _recent_assignments(subject_id, shift.shift_date)
     try:
         append_event(
             aggregate_type=request["aggregate_type"],
@@ -129,7 +157,7 @@ def _evaluate_one(app, request, *, availability, weekly_hours, search, retrieve)
                 "decision": choice["decision"],
                 "rationale": choice["rationale"],
                 "hours_warning": choice["hours_warning"],
-                "sources": _sources(conflict, hours, tavily, retrieval_ok, passage_count, history),
+                "sources": sources,
             },
             actor_id=ACTOR_ID,
         )
@@ -139,6 +167,13 @@ def _evaluate_one(app, request, *, availability, weekly_hours, search, retrieve)
             return None
         return None
     return choice["decision"]
+
+
+def _call_search(search, shift_date, locality):
+    try:
+        return search(shift_date, locality)
+    except TypeError:
+        return search(shift_date)
 
 
 def _pending_requests():
@@ -154,9 +189,17 @@ def _pending_requests():
         .filter(Event.event_type == AGENT_EVALUATION_COMPLETED)
         .all()
     }
+    colleague_accepted = {
+        row[0]
+        for row in db.session.query(Event.aggregate_id)
+        .filter(Event.event_type == SWAP_COLLEAGUE_APPROVED)
+        .all()
+    }
     pending = []
     for event in requested:
         if event.aggregate_id in done:
+            continue
+        if event.event_type == SWAP_REQUESTED and event.aggregate_id not in colleague_accepted:
             continue
         pending.append(
             {

@@ -1,5 +1,6 @@
 import json
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import inspect, text
 
@@ -12,6 +13,8 @@ from app.event_store import (
     SHIFT_CANCELLED,
     SHIFT_DEFINED,
     SWAP_APPROVED,
+    SWAP_COLLEAGUE_APPROVED,
+    SWAP_COLLEAGUE_REJECTED,
     SWAP_REJECTED,
     SWAP_REQUESTED,
     Event,
@@ -29,21 +32,49 @@ from app.read_models import (
 from app.tools.schedule import duration_hours, week_start_sunday
 
 SHIFT_BOARD_PROJECTOR = "shift_board"
+ISRAEL = ZoneInfo("Asia/Jerusalem")
 WAITING_FOR_AGENT = "Waiting for agent evaluation"
+WAITING_FOR_EMPLOYEE = "Waiting for employee approval"
 WAITING_FOR_MANAGER = "Waiting for manager decision"
 STATUS_APPROVED = "Approved"
 STATUS_REJECTED = "Rejected"
 
 
 def ensure_read_models():
+    # A read left open on SQL Server blocks the next schema check and the page hangs.
+    db.session.rollback()
     ShiftBoardRow.__table__.create(db.engine, checkfirst=True)
     ProjectorCheckpoint.__table__.create(db.engine, checkfirst=True)
     ShiftRequestRow.__table__.create(db.engine, checkfirst=True)
     _ensure_decision_note()
+    _ensure_display_number()
+    RequestRecommendationRow.__table__.create(db.engine, checkfirst=True)
+    _ensure_sources_json()
     AvailabilityConstraintRow.__table__.create(db.engine, checkfirst=True)
     EmployeeHoursRow.__table__.create(db.engine, checkfirst=True)
     ApprovedAssignmentRow.__table__.create(db.engine, checkfirst=True)
     RequestRecommendationRow.__table__.create(db.engine, checkfirst=True)
+    close_expired_shifts()
+
+
+def close_expired_shifts(today=None):
+    """Open or partial shifts before today are closed. Registration is no longer possible."""
+    current = today or datetime.now(ISRAEL).date()
+    rows = (
+        db.session.query(ShiftBoardRow)
+        .filter(
+            ShiftBoardRow.shift_date < current,
+            ShiftBoardRow.status.in_(["open", "partial"]),
+        )
+        .all()
+    )
+    for row in rows:
+        row.status = "closed"
+    if rows:
+        db.session.commit()
+    else:
+        db.session.rollback()
+    return len(rows)
 
 
 def project_shift_board():
@@ -64,6 +95,10 @@ def project_shift_board():
             _apply_request(event, "assignment")
         elif event.event_type == SWAP_REQUESTED:
             _apply_request(event, "swap")
+        elif event.event_type == SWAP_COLLEAGUE_APPROVED:
+            _apply_colleague(event, WAITING_FOR_AGENT)
+        elif event.event_type == SWAP_COLLEAGUE_REJECTED:
+            _apply_colleague(event, STATUS_REJECTED)
         elif event.event_type == AVAILABILITY_CONSTRAINT_SUBMITTED:
             _apply_availability(event)
         elif event.event_type == ASSIGNMENT_APPROVED:
@@ -88,6 +123,7 @@ def project_shift_board():
             checkpoint.last_event_id = event.event_id
         db.session.commit()
         processed += 1
+    close_expired_shifts()
     return processed
 
 
@@ -124,6 +160,7 @@ def _apply_request(event, request_type):
         decision_note="",
         replacement_employee_id=payload.get("replacement_employee_id"),
         replacement_name=payload.get("replacement_name"),
+        display_number=payload.get("display_number"),
     )
     db.session.add(row)
     if request_type == "assignment":
@@ -217,6 +254,7 @@ def _apply_evaluation(event):
     row.decision = payload["decision"]
     row.rationale = payload["rationale"]
     row.hours_warning = bool(payload.get("hours_warning"))
+    row.sources_json = json.dumps(payload.get("sources") or [])
     request_row = db.session.get(ShiftRequestRow, event.aggregate_id)
     if request_row is not None and request_row.status == WAITING_FOR_AGENT:
         request_row.status = WAITING_FOR_MANAGER
@@ -265,6 +303,13 @@ def _apply_swap_approved(event):
     _close_request(event.aggregate_id, STATUS_APPROVED, payload.get("manager_note") or "")
 
 
+def _apply_colleague(event, status):
+    row = db.session.get(ShiftRequestRow, event.aggregate_id)
+    if row is None:
+        return
+    row.status = status
+
+
 def _close_request(request_id, status, decision_note):
     row = db.session.get(ShiftRequestRow, request_id)
     if row is None:
@@ -276,6 +321,33 @@ def _close_request(request_id, status, decision_note):
         shift = db.session.get(ShiftBoardRow, row.shift_id)
         if shift is not None and shift.waiting_candidates:
             shift.waiting_candidates -= 1
+
+
+def _ensure_display_number():
+    _ensure_column(
+        "read_shift_requests",
+        "display_number",
+        sqlite_sql="ALTER TABLE read_shift_requests ADD COLUMN display_number INTEGER",
+        sqlserver_sql="ALTER TABLE read_shift_requests ADD display_number INT NULL",
+    )
+
+
+def _ensure_sources_json():
+    _ensure_column(
+        "read_request_recommendations",
+        "sources_json",
+        sqlite_sql="ALTER TABLE read_request_recommendations ADD COLUMN sources_json TEXT",
+        sqlserver_sql="ALTER TABLE read_request_recommendations ADD sources_json NVARCHAR(MAX) NULL",
+    )
+
+
+def _ensure_column(table_name, column_name, sqlite_sql, sqlserver_sql):
+    columns = {column["name"] for column in inspect(db.engine).get_columns(table_name)}
+    if column_name in columns:
+        return
+    statement = sqlite_sql if db.engine.dialect.name == "sqlite" else sqlserver_sql
+    db.session.execute(text(statement))
+    db.session.commit()
 
 
 def _ensure_decision_note():
