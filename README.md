@@ -38,14 +38,10 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Set the environment variables in the same shell before starting either process:
+Copy [.env.example](.env.example) to `.env` and fill in the Somee connection string from the Somee control panel. `.env` stays on this machine. The app, the agent worker, and the MCP server load it at startup.
 
 ```powershell
-$env:SECRET_KEY = "replace-with-a-session-secret"
-$env:SOMEE_SQLSERVER_CONNECTION_STRING = "mssql+pyodbc://USER:PASSWORD@HOST/DB?driver=ODBC+Driver+18+for+SQL+Server"
-$env:MCP_TAVILY_API_KEY = "replace-with-the-tavily-key"
-$env:MCP_GMAIL_CREDENTIALS = "replace-with-the-gmail-mcp-credentials"
-$env:VECTOR_STORE_PATH = "instance/chroma"
+Copy-Item .env.example .env
 ```
 
 Start the Flask app:
@@ -82,7 +78,7 @@ python mcp_server.py
 
 It exposes `calculate_weekly_hours` and `check_availability_conflicts`. Both read the read models only. On Somee, run [db/006_read_employee_hours.sql](db/006_read_employee_hours.sql) once. A swap request calls the availability tool before it is stored. Tavily search uses `MCP_TAVILY_API_KEY`. Gmail sends through the MCP command in `MCP_GMAIL_COMMAND` when `MCP_GMAIL_CREDENTIALS` is set. `flask dispatch-notifications` emails employees after an approval, rejection, or cancellation and records `NotificationSent` or `NotificationFailed`. The decision stays in effect either way.
 
-In a second terminal, with the virtual environment activated and the same variables set, start the agent:
+In a second terminal, with the virtual environment activated, start the agent:
 
 ```powershell
 python agent_worker.py
