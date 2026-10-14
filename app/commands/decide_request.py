@@ -13,6 +13,8 @@ from app.event_store import (
     SHIFT_CANCELLED,
     SHIFT_DEFINED,
     SWAP_APPROVED,
+    SWAP_COLLEAGUE_APPROVED,
+    SWAP_COLLEAGUE_REJECTED,
     SWAP_REJECTED,
     SWAP_REQUESTED,
     Event,
@@ -52,6 +54,13 @@ def decide_request(*, actor_id, actor_role, request_id, action, note="", expecte
         raise CommandRejected("This request is not a {0} request.".format(label))
     if any(event.event_type in DECISION_EVENTS for event in history):
         raise CommandRejected("This request already has a decision.")
+    if request_type == "swap":
+        if any(event.event_type == SWAP_COLLEAGUE_REJECTED for event in history):
+            raise CommandRejected("The other employee declined this swap.")
+        if not any(event.event_type == SWAP_COLLEAGUE_APPROVED for event in history):
+            raise CommandRejected(
+                "The other employee has to approve the swap before a manager can decide."
+            )
     if not any(event.event_type == AGENT_EVALUATION_COMPLETED for event in history):
         raise CommandRejected("A request cannot be decided before a recommendation exists.")
 

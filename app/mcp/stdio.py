@@ -1,9 +1,18 @@
 import json
 import os
 import subprocess
+import sys
+import threading
+from pathlib import Path
 
 
-def call_tool(command, name, arguments, extra_env=None):
+def bundled_command(script_name):
+    """Shell command that starts one of the project MCP servers."""
+    script = Path(__file__).resolve().parents[2] / script_name
+    return subprocess.list2cmdline([sys.executable, str(script)])
+
+
+def call_tool(command, name, arguments, extra_env=None, failure_code="mcp_unavailable"):
     """Call one tool on an MCP server started from a shell command."""
     env = os.environ.copy()
     if extra_env:
@@ -16,6 +25,8 @@ def call_tool(command, name, arguments, extra_env=None):
         env=env,
         shell=True,
     )
+    timer = threading.Timer(25, process.kill)
+    timer.start()
     try:
         _exchange(
             process,
@@ -43,13 +54,28 @@ def call_tool(command, name, arguments, extra_env=None):
                 "params": {"name": name, "arguments": arguments},
             },
         )
+    except Exception:
+        return {"ok": False, "error_code": failure_code}
     finally:
-        process.kill()
+        timer.cancel()
+        if process.poll() is None:
+            process.kill()
     content = ((response.get("result") or {}).get("content") or [{}])[0].get("text") or ""
     try:
         return json.loads(content)
     except json.JSONDecodeError:
-        return {"ok": False, "error_code": "gmail_unavailable"}
+        return {"ok": False, "error_code": failure_code}
+
+
+def run_stdio_server(handle):
+    """Read MCP messages from stdin until the client closes the pipe."""
+    while True:
+        message = read_message(sys.stdin.buffer)
+        if message is None:
+            return
+        response = handle(message)
+        if response is not None:
+            write_message(sys.stdout.buffer, response)
 
 
 def read_message(stream):

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% set title = "Employees" %}
+{% block content %}
+<header class="page-head">
+  <p class="eyebrow">Manager</p>
+  <h1>Employees</h1>
+</header>
+{% if employees %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Email</th>
+        <th>Professional role</th>
+        <th>Locality</th>
+        <th>Account</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for person in employees %}
+      <tr>
+        <td>{{ person.full_name }}</td>
+        <td>{{ person.email }}</td>
+        <td>{{ person.professional_role }}</td>
+        <td>{{ person.locality }}</td>
+        <td><span class="pill {{ 'staffed' if person.is_active else 'cancelled' }}">{{ "active" if person.is_active else "inactive" }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="empty">No employees are registered.</p>
+{% endif %}
+{% endblock %}

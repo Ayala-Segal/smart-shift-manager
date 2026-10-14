@@ -9,24 +9,41 @@
 <body>
   <div class="shell">
     <header class="top">
-      <a class="brand" href="{{ url_for('index') }}">Smart Shift Manager</a>
+      <a class="brand" href="{{ url_for('index') }}">
+        <span class="brand-mark">SS</span>
+        <span>
+          <strong>Smart Shift Manager</strong>
+          <small>Scheduling</small>
+        </span>
+      </a>
       {% if current_user.is_authenticated %}
       <nav class="nav" aria-label="Primary">
         {% if current_user.role == "manager" %}
-        <a href="{{ url_for('screens.manager_home') }}">Dashboard</a>
-        <a href="{{ url_for('screens.board') }}">Board</a>
-        <a href="{{ url_for('screens.decisions') }}">Requests</a>
-        <a href="{{ url_for('screens.new_shift') }}">Define shift</a>
+        <a href="{{ url_for('screens.manager_home') }}" {% if request.endpoint == 'screens.manager_home' %}aria-current="page"{% endif %}>Dashboard</a>
+        <a href="{{ url_for('screens.board') }}" {% if request.endpoint == 'screens.board' %}aria-current="page"{% endif %}>Board</a>
+        <a href="{{ url_for('screens.decisions') }}" {% if request.endpoint == 'screens.decisions' %}aria-current="page"{% endif %}>Requests</a>
+        <a href="{{ url_for('screens.employees') }}" {% if request.endpoint == 'screens.employees' %}aria-current="page"{% endif %}>Employees</a>
+        <a href="{{ url_for('screens.new_shift') }}" {% if request.endpoint == 'screens.new_shift' %}aria-current="page"{% endif %}>Define shift</a>
         {% else %}
-        <a href="{{ url_for('screens.my_home') }}">My shifts</a>
-        <a href="{{ url_for('screens.search') }}">Search</a>
-        <a href="{{ url_for('screens.constraints') }}">Constraints</a>
-        <a href="{{ url_for('screens.swaps') }}">Swap</a>
+        <a href="{{ url_for('screens.my_home') }}" {% if request.endpoint == 'screens.my_home' %}aria-current="page"{% endif %}>My shifts</a>
+        <a href="{{ url_for('screens.search') }}" {% if request.endpoint == 'screens.search' %}aria-current="page"{% endif %}>Search</a>
+        <a href="{{ url_for('screens.constraints') }}" {% if request.endpoint == 'screens.constraints' %}aria-current="page"{% endif %}>Constraints</a>
+        <a href="{{ url_for('screens.swaps') }}" {% if request.endpoint == 'screens.swaps' %}aria-current="page"{% endif %}>Swap</a>
+        <a href="{{ url_for('screens.swap_approvals') }}" {% if request.endpoint == 'screens.swap_approvals' %}aria-current="page"{% endif %}>Approvals</a>
         {% endif %}
       </nav>
-      <form method="post" action="{{ url_for('screens.sign_out') }}" class="sign-out">
-        <button type="submit">Sign out</button>
-      </form>
+      <div class="account-bar">
+        <a class="account" href="{{ url_for('screens.profile') }}" {% if request.endpoint == 'screens.profile' %}aria-current="page"{% endif %}>
+          <span class="avatar" aria-hidden="true">{{ current_user.full_name[:1] }}</span>
+          <span class="account-copy">
+            <strong>{{ current_user.full_name }}</strong>
+            <small>{{ current_user.email }}</small>
+          </span>
+        </a>
+        <form method="post" action="{{ url_for('screens.sign_out') }}" class="sign-out">
+          <button type="submit">Sign out</button>
+        </form>
+      </div>
       {% endif %}
     </header>
     <main>

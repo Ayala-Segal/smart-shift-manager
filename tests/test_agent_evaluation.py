@@ -135,13 +135,14 @@ class AgentEvaluationTests(unittest.TestCase):
         self.assertEqual(missing["decision"], "approve")
         self.assertIn("Holiday data was unavailable.", missing["rationale"])
 
-    def test_a_failed_hours_tool_leaves_the_request_for_the_next_cycle(self):
+    def test_a_failed_hours_tool_still_reaches_the_manager(self):
         self._request(self.employee_id, "cashier")
         evaluated = self._cycle(weekly_hours=lambda *args, **kwargs: error("invalid_hours"))
-        self.assertEqual(evaluated, 0)
-        self.assertIsNone(self._recommendation())
-        recovered = self._cycle()
-        self.assertEqual(recovered, 1)
+        self.assertEqual(evaluated, 1)
+        payload = self._payload(self._recommendation())
+        self.assertEqual(payload["decision"], "warning")
+        self.assertIn("manager still needs to decide", payload["rationale"])
+        self.assertEqual(self._cycle(), 0)
 
     def _cycle(self, **kwargs):
         options = {

@@ -3,8 +3,13 @@ from zoneinfo import ZoneInfo
 
 from app.auth.models import ROLE_EMPLOYEE, User
 from app.extensions import db
-from app.projections import WAITING_FOR_AGENT, WAITING_FOR_MANAGER, ensure_read_models
-from app.queries.board import get_shift_board
+from app.projections import (
+    WAITING_FOR_AGENT,
+    WAITING_FOR_EMPLOYEE,
+    WAITING_FOR_MANAGER,
+    ensure_read_models,
+)
+from app.queries.board import get_shift_board, recommendation_findings
 from app.read_models import (
     ApprovedAssignmentRow,
     AvailabilityConstraintRow,
@@ -16,7 +21,7 @@ from app.read_models import (
 from app.tools.schedule import week_start_sunday
 
 ISRAEL = ZoneInfo("Asia/Jerusalem")
-OPEN_REQUESTS = (WAITING_FOR_AGENT, WAITING_FOR_MANAGER)
+OPEN_REQUESTS = (WAITING_FOR_AGENT, WAITING_FOR_EMPLOYEE, WAITING_FOR_MANAGER)
 
 
 def manager_dashboard_summary(today=None, start=None, end=None):
@@ -34,6 +39,7 @@ def manager_dashboard_summary(today=None, start=None, end=None):
         "open_shifts": _count_status(rows, "open"),
         "partial_shifts": _count_status(rows, "partial"),
         "staffed_shifts": _count_status(rows, "staffed"),
+        "closed_shifts": len(get_shift_board(end=range_end, statuses=["closed"])),
         "waiting_for_manager": _count_status_text(requests, WAITING_FOR_MANAGER),
         "waiting_for_agent": _count_status_text(requests, WAITING_FOR_AGENT),
         "unstaffed": [_unstaffed_row(row) for row in rows if row.status in {"open", "partial"}],
@@ -62,12 +68,12 @@ def employee_dashboard(employee_id, today=None):
         .filter(
             ApprovedAssignmentRow.employee_id == employee_id,
             ApprovedAssignmentRow.active.is_(True),
-            ApprovedAssignmentRow.shift_date >= week_start,
-            ApprovedAssignmentRow.shift_date <= week_end,
         )
         .order_by(ApprovedAssignmentRow.shift_date, ApprovedAssignmentRow.start_time)
         .all()
     )
+    upcoming = [row for row in approved if row.shift_date >= current]
+    past = [row for row in approved if row.shift_date < current]
     requests = (
         db.session.query(ShiftRequestRow)
         .filter(ShiftRequestRow.employee_id == employee_id)
@@ -78,7 +84,8 @@ def employee_dashboard(employee_id, today=None):
         "week_start": week_start.isoformat(),
         "week_end": week_end.isoformat(),
         "approved_hours": round(hours.approved_hours, 2) if hours is not None else 0,
-        "approved_shifts": [_approved_shift(row) for row in approved],
+        "approved_shifts": [_approved_shift(row) for row in upcoming],
+        "past_shifts": [_approved_shift(row) for row in past],
         "open_requests": [_request_summary(row) for row in requests if row.status in OPEN_REQUESTS],
         "decided_requests": [
             _request_summary(row) for row in requests if row.status not in OPEN_REQUESTS
@@ -86,18 +93,41 @@ def employee_dashboard(employee_id, today=None):
     }
 
 
-def my_approved_shifts(employee_id):
+def my_approved_shifts(employee_id, today=None):
     ensure_read_models()
+    current = today or datetime.now(ISRAEL).date()
     rows = (
         db.session.query(ApprovedAssignmentRow)
         .filter(
             ApprovedAssignmentRow.employee_id == employee_id,
             ApprovedAssignmentRow.active.is_(True),
+            ApprovedAssignmentRow.shift_date >= current,
         )
         .order_by(ApprovedAssignmentRow.shift_date, ApprovedAssignmentRow.start_time)
         .all()
     )
     return [_approved_shift(row) for row in rows]
+
+
+def employees_directory():
+    """Employee accounts for the manager roster. This does not read events."""
+    users = (
+        db.session.query(User)
+        .filter(User.role == ROLE_EMPLOYEE)
+        .order_by(User.full_name, User.email)
+        .all()
+    )
+    return [
+        {
+            "user_id": user.user_id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "professional_role": user.professional_role,
+            "is_active": user.is_active,
+            "locality": user.locality or "Israel",
+        }
+        for user in users
+    ]
 
 
 def other_employees(user_id):
@@ -119,6 +149,22 @@ def other_employees(user_id):
         }
         for user in users
     ]
+
+
+def incoming_swaps(employee_id):
+    """Swaps where this employee is the named replacement and has not responded."""
+    ensure_read_models()
+    rows = (
+        db.session.query(ShiftRequestRow)
+        .filter(
+            ShiftRequestRow.request_type == "swap",
+            ShiftRequestRow.replacement_employee_id == employee_id,
+            ShiftRequestRow.status == WAITING_FOR_EMPLOYEE,
+        )
+        .order_by(ShiftRequestRow.display_number, ShiftRequestRow.request_id)
+        .all()
+    )
+    return [_request_summary(row) for row in rows]
 
 
 def constraints_for(employee_id):
@@ -179,9 +225,11 @@ def _decision_row(row):
     shift = db.session.get(ShiftBoardRow, row.shift_id)
     return {
         "request_id": row.request_id,
+        "display_number": row.display_number,
         "request_type": row.request_type,
         "employee_id": row.employee_id,
         "full_name": row.full_name,
+        "note": row.note,
         "shift_id": row.shift_id,
         "shift_date": shift.shift_date.isoformat() if shift is not None else "",
         "weekday": shift.weekday if shift is not None else "",
@@ -191,6 +239,7 @@ def _decision_row(row):
         "recommendation": recommendation.decision if recommendation is not None else "",
         "rationale": recommendation.rationale if recommendation is not None else "",
         "hours_warning": bool(recommendation.hours_warning) if recommendation is not None else False,
+        "findings": recommendation_findings(recommendation.sources_json) if recommendation is not None else [],
         "replacement_name": row.replacement_name or "",
     }
 
@@ -212,11 +261,15 @@ def _request_summary(row):
     shift = db.session.get(ShiftBoardRow, row.shift_id)
     return {
         "request_id": row.request_id,
+        "display_number": row.display_number,
         "request_type": row.request_type,
+        "full_name": row.full_name,
+        "replacement_name": row.replacement_name or "",
         "status": row.status,
         "shift_id": row.shift_id,
         "shift_date": shift.shift_date.isoformat() if shift is not None else "",
         "start_time": shift.start_time if shift is not None else "",
         "end_time": shift.end_time if shift is not None else "",
+        "note": row.note,
         "decision_note": row.decision_note,
     }

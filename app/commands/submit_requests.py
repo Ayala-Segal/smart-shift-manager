@@ -3,7 +3,7 @@ from datetime import date, datetime
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from app.auth.models import ROLE_EMPLOYEE, User
+from app.auth.models import ROLE_EMPLOYEE, ROLE_MANAGER, User
 from app.commands.define_shift import CommandRejected
 from app.event_store import (
     AGGREGATE_ASSIGNMENT_REQUEST,
@@ -13,6 +13,8 @@ from app.event_store import (
     ASSIGNMENT_REQUESTED,
     AVAILABILITY_CONSTRAINT_SUBMITTED,
     SHIFT_DEFINED,
+    SWAP_COLLEAGUE_APPROVED,
+    SWAP_COLLEAGUE_REJECTED,
     SWAP_REQUESTED,
     Event,
     append_event,
@@ -22,6 +24,7 @@ from app.tools.conflicts import check_availability_conflicts
 
 ISRAEL = ZoneInfo("Asia/Jerusalem")
 WAITING = "Waiting for agent evaluation"
+WAITING_FOR_EMPLOYEE = "Waiting for employee approval"
 CONSTRAINT_TYPES = frozenset({"unavailable", "prefer", "prefer not"})
 
 
@@ -50,16 +53,29 @@ def submit_availability(*, actor_id, actor_role, constraint_type, note="", shift
     )
 
 
-def request_assignment(*, actor_id, actor_role, shift_id, note=""):
+def request_assignment(*, actor_id, actor_role, shift_id, note="", today=None):
     if actor_role != ROLE_EMPLOYEE:
         raise CommandRejected("Only an employee can request an assignment.")
-    employee = _active_employee(actor_id)
+    return _queue_assignment(
+        employee_id=actor_id,
+        actor_id=actor_id,
+        shift_id=shift_id,
+        note=note,
+        today=today,
+    )
+
+
+def _queue_assignment(*, employee_id, actor_id, shift_id, note, today):
+    employee = _active_employee(employee_id)
     shift = _defined_shift(shift_id)
+    current_day = today or datetime.now(ISRAEL).date()
+    if date.fromisoformat(shift["shift_date"]) < current_day:
+        raise CommandRejected("Assignment requests are only accepted for a current or future shift.")
     if shift["status"] not in {"open", "partial"}:
         raise CommandRejected("Assignment requests are only accepted for open or partial shifts.")
     if employee.professional_role != shift["required_role"]:
         raise CommandRejected("Your professional role does not match this shift.")
-    if _has_assignment_request(actor_id, shift_id):
+    if _has_assignment_request(employee_id, shift_id):
         raise CommandRejected("You already requested this shift.")
     stored_note = note or ""
     if len(stored_note) > 300:
@@ -71,13 +87,27 @@ def request_assignment(*, actor_id, actor_role, shift_id, note=""):
         event_type=ASSIGNMENT_REQUESTED,
         payload={
             "shift_id": shift_id,
-            "employee_id": actor_id,
+            "employee_id": employee_id,
             "full_name": employee.full_name,
             "professional_role": employee.professional_role,
             "note": stored_note,
             "status": WAITING,
+            "display_number": _next_display_number(),
         },
         actor_id=actor_id,
+    )
+
+
+def register_employee(*, actor_id, actor_role, shift_id, employee_id, note="", today=None):
+    """A manager places an employee on the request queue. The agent evaluates next."""
+    if actor_role != ROLE_MANAGER:
+        raise CommandRejected("Only a manager can register an employee for a shift.")
+    return _queue_assignment(
+        employee_id=employee_id,
+        actor_id=actor_id,
+        shift_id=shift_id,
+        note=note,
+        today=today,
     )
 
 
@@ -122,9 +152,54 @@ def request_swap(*, actor_id, actor_role, shift_id, replacement_employee_id, not
             "replacement_employee_id": replacement.user_id,
             "replacement_name": replacement.full_name,
             "note": stored_note,
-            "status": WAITING,
+            "status": WAITING_FOR_EMPLOYEE,
+            "display_number": _next_display_number(),
         },
         actor_id=actor_id,
+    )
+
+
+def respond_to_swap(*, actor_id, actor_role, request_id, action):
+    """The employee named on a swap accepts or declines it. The manager decides later."""
+    if actor_role != ROLE_EMPLOYEE:
+        raise CommandRejected("Only an employee can respond to a swap.")
+    choice = (action or "").strip().lower()
+    if choice not in {"approve", "reject"}:
+        raise CommandRejected("Choose approve or reject.")
+    events = (
+        db.session.query(Event)
+        .filter(Event.aggregate_id == request_id)
+        .order_by(Event.version)
+        .all()
+    )
+    requested = next((event for event in events if event.event_type == SWAP_REQUESTED), None)
+    if requested is None:
+        raise CommandRejected("The swap request does not exist.")
+    if any(event.event_type in {SWAP_COLLEAGUE_APPROVED, SWAP_COLLEAGUE_REJECTED} for event in events):
+        raise CommandRejected("This swap already has an employee response.")
+    payload = json.loads(requested.payload_json)
+    if payload.get("replacement_employee_id") != actor_id:
+        raise CommandRejected("Only the selected employee can respond to this swap.")
+    event_type = SWAP_COLLEAGUE_APPROVED if choice == "approve" else SWAP_COLLEAGUE_REJECTED
+    return append_event(
+        aggregate_type=AGGREGATE_SWAP_REQUEST,
+        aggregate_id=request_id,
+        event_type=event_type,
+        payload={
+            "shift_id": payload["shift_id"],
+            "employee_id": payload["employee_id"],
+            "replacement_employee_id": actor_id,
+            "display_number": payload.get("display_number"),
+        },
+        actor_id=actor_id,
+    )
+
+
+def _next_display_number():
+    return (
+        db.session.query(Event)
+        .filter(Event.event_type.in_([ASSIGNMENT_REQUESTED, SWAP_REQUESTED]))
+        .count()
     )
 
 

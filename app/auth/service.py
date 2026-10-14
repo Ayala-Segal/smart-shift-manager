@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -16,6 +17,16 @@ class RegistrationError(Exception):
 
 def ensure_accounts_table():
     User.__table__.create(db.engine, checkfirst=True)
+    _ensure_account_column(
+        "locality",
+        "ALTER TABLE users ADD COLUMN locality VARCHAR(80) NOT NULL DEFAULT 'Israel'",
+        "ALTER TABLE users ADD locality VARCHAR(80) NOT NULL CONSTRAINT DF_users_locality DEFAULT 'Israel'",
+    )
+    _ensure_account_column(
+        "notify_email",
+        "ALTER TABLE users ADD COLUMN notify_email BOOLEAN NOT NULL DEFAULT 1",
+        "ALTER TABLE users ADD notify_email BIT NOT NULL CONSTRAINT DF_users_notify_email DEFAULT 1",
+    )
 
 
 def register_user(full_name, email, password, role, professional_role):
@@ -50,6 +61,50 @@ def authenticate(email, password):
     if not check_password_hash(user.password_hash, password or ""):
         return None
     return user
+
+
+def update_profile(user, *, full_name, professional_role, locality, notify_email, current_password, new_password):
+    """Update the signed-in account. Email stays the sign-in name."""
+    ensure_accounts_table()
+    errors = {}
+    name = (full_name or "").strip()
+    if not name:
+        errors["full_name"] = "Enter your full name."
+    elif len(name) > 120:
+        errors["full_name"] = "Full name must be 120 characters or fewer."
+    profession = (professional_role or "").strip()
+    if user.role == ROLE_EMPLOYEE and not profession:
+        errors["professional_role"] = "Enter the professional role for this employee."
+    elif len(profession) > 64:
+        errors["professional_role"] = "Professional role must be 64 characters or fewer."
+    place = (locality or "").strip() or "Israel"
+    if len(place) > 80:
+        errors["locality"] = "Locality must be 80 characters or fewer."
+    replacement = new_password or ""
+    if replacement or (current_password or ""):
+        if not check_password_hash(user.password_hash, current_password or ""):
+            errors["current_password"] = "The current password does not match."
+        elif len(replacement) < 8:
+            errors["new_password"] = "Password must be at least 8 characters."
+    if errors:
+        raise RegistrationError(errors)
+    user.full_name = name
+    user.professional_role = profession
+    user.locality = place
+    user.notify_email = bool(notify_email)
+    if replacement:
+        user.password_hash = generate_password_hash(replacement)
+    db.session.commit()
+    return user
+
+
+def _ensure_account_column(name, sqlite_sql, sqlserver_sql):
+    columns = {column["name"] for column in inspect(db.engine).get_columns("users")}
+    if name in columns:
+        return
+    statement = sqlite_sql if db.engine.dialect.name == "sqlite" else sqlserver_sql
+    db.session.execute(text(statement))
+    db.session.commit()
 
 
 def _registration_errors(full_name, email, password, role, professional_role):

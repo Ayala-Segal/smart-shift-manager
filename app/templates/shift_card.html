@@ -39,11 +39,11 @@
         <td>{{ item.request_type }}</td>
         <td>{{ item.status }}</td>
         {% if current_user.role == "manager" %}
-        <td>
+        <td class="recommendation-cell">
           {% if item.recommendation %}
-          <span class="pill {{ item.recommendation }}">{{ item.recommendation }}</span>
-          <span>{{ item.rationale }}</span>
-          {% if item.hours_warning %}<span class="pill warning">hours warning</span>{% endif %}
+          {% include "recommendation.html" %}
+          {% else %}
+          <span class="pill">waiting for the agent</span>
           {% endif %}
         </td>
         {% endif %}
@@ -56,12 +56,34 @@
 <p class="empty">No requests yet.</p>
 {% endif %}
 
-{% if current_user.role == "employee" and shift.status in ["open", "partial"] %}
+{% if current_user.role == "employee" and detail.registration_open %}
 <h2>Request this shift</h2>
 <form method="post" action="{{ url_for('screens.request_shift', shift_id=shift.shift_id) }}">
   <label for="note">Note</label>
   <textarea id="note" name="note" maxlength="300"></textarea>
   <button type="submit">Submit request</button>
 </form>
+{% elif current_user.role == "employee" %}
+<p class="empty">This shift is closed, so registration is closed.</p>
+{% elif current_user.role == "manager" and detail.registration_open %}
+<h2>Register an employee</h2>
+<p class="hint">This sends the employee to the agent. The recommendation then appears under Requests.</p>
+{% if candidates %}
+<form method="post" action="{{ url_for('screens.register_for_shift', shift_id=shift.shift_id) }}">
+  <label for="employee_id">Employee</label>
+  <select id="employee_id" name="employee_id" required>
+    {% for person in candidates %}
+    <option value="{{ person.user_id }}">{{ person.full_name }} · {{ person.professional_role }}</option>
+    {% endfor %}
+  </select>
+  <label for="manager-note">Note</label>
+  <textarea id="manager-note" name="note" maxlength="300"></textarea>
+  <button type="submit">Register and ask the agent</button>
+</form>
+{% else %}
+<p class="empty">No active employee has the role {{ shift.required_role }}.</p>
+{% endif %}
+{% elif current_user.role == "manager" %}
+<p class="empty">This shift is closed, so registration is closed.</p>
 {% endif %}
 {% endblock %}

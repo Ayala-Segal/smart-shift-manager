@@ -1,5 +1,6 @@
 import os
 
+from app.mcp.stdio import bundled_command
 from app.tools.contract import error, ok
 
 
@@ -22,10 +23,10 @@ def send_message(*, to, subject, body, transport=None):
 
 
 def _gmail_mcp(*, to, subject, body):
-    command = os.environ.get("MCP_GMAIL_COMMAND", "").strip()
     credentials = os.environ.get("MCP_GMAIL_CREDENTIALS", "").strip()
-    if not command or not credentials:
+    if not credentials:
         return None
+    command = os.environ.get("MCP_GMAIL_COMMAND", "").strip() or bundled_command("gmail_mcp_server.py")
     from app.mcp.stdio import call_tool
 
     return call_tool(
@@ -33,4 +34,5 @@ def _gmail_mcp(*, to, subject, body):
         "send_email",
         {"to": to, "subject": subject, "body": body},
         extra_env={"MCP_GMAIL_CREDENTIALS": credentials},
+        failure_code="gmail_unavailable",
     )

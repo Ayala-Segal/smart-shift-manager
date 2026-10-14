@@ -56,6 +56,10 @@ def dispatch_notifications(transport=None):
                 _record(decision, employee_id, subject, "missing_address")
                 seen.add(key)
                 continue
+            if getattr(employee, "notify_email", True) is False:
+                _record(decision, employee_id, subject, "notifications_disabled")
+                seen.add(key)
+                continue
             result = send_message(
                 to=employee.email,
                 subject=subject,

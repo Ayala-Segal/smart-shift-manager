@@ -76,7 +76,11 @@ The weekly-hours and availability tools are an MCP server, not browser routes. S
 python mcp_server.py
 ```
 
-It exposes `calculate_weekly_hours` and `check_availability_conflicts`. Both read the read models only. On Somee, run [db/006_read_employee_hours.sql](db/006_read_employee_hours.sql) once. A swap request calls the availability tool before it is stored. Tavily search uses `MCP_TAVILY_API_KEY`. Gmail sends through the MCP command in `MCP_GMAIL_COMMAND` when `MCP_GMAIL_CREDENTIALS` is set. `flask dispatch-notifications` emails employees after an approval, rejection, or cancellation and records `NotificationSent` or `NotificationFailed`. The decision stays in effect either way.
+It exposes `calculate_weekly_hours` and `check_availability_conflicts`. Both read the read models only. On Somee, run [db/006_read_employee_hours.sql](db/006_read_employee_hours.sql) once. A swap request calls the availability tool before it is stored.
+
+Tavily and Gmail are separate MCP servers. Copy [.env.example](.env.example) to `.env`. Put a key from [tavily.com](https://tavily.com) in `MCP_TAVILY_API_KEY`. Leave `MCP_TAVILY_COMMAND` empty and the app starts `python tavily_mcp_server.py` for each search. For Gmail, set `MCP_GMAIL_CREDENTIALS` to `{"address":"you@gmail.com","app_password":"the-app-password"}` or to a path of a JSON file with those fields. Create the app password in the Google account. Leave `MCP_GMAIL_COMMAND` empty and the app starts `python gmail_mcp_server.py`. An empty key or empty credentials returns `not_configured` and does not stop the board. `flask dispatch-notifications` emails employees after an approval, rejection, or cancellation and records `NotificationSent` or `NotificationFailed`. The decision stays in effect either way.
+
+A manager downloads the shift table, including assigned count and waiting candidates, from **Export report** on the board or the dashboard. The file is `shift-report.csv`.
 
 In a second terminal, with the virtual environment activated, start the agent:
 

@@ -1,0 +1,23 @@
+<section class="recommendation recommendation-{{ item.recommendation or 'pending' }}">
+  <div class="recommendation-head">
+    <span class="eyebrow">Agent recommendation</span>
+    {% if item.recommendation %}
+    <span class="pill {{ item.recommendation }}">{{ item.recommendation }}</span>
+    {% else %}
+    <span class="pill">waiting</span>
+    {% endif %}
+    {% if item.hours_warning %}<span class="pill warning">weekly hours</span>{% endif %}
+  </div>
+  {% if item.findings %}
+  <ul class="findings">
+    {% for line in item.findings %}
+    <li>{{ line }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if item.rationale %}
+  <p class="rationale">{{ item.rationale }}</p>
+  {% elif not item.findings %}
+  <p class="rationale">The agent has not written a recommendation yet.</p>
+  {% endif %}
+</section>

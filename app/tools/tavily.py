@@ -1,17 +1,13 @@
-import json
 import os
-import urllib.request
 
+from app.mcp.stdio import bundled_command
 from app.tools.contract import error, ok
-
-TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 
 
 def search_date_context(shift_date, locality="Israel", search=None):
-    """Ask Tavily whether the date has a holiday, event, or weather warning.
+    """Ask the Tavily MCP server whether the date has a holiday or event.
 
-    The call uses the same search the Tavily MCP tool performs. A missing key
-    or a failed call returns an error code and does not raise.
+    A missing API key or a failed MCP call returns an error code and does not raise.
     """
     if not str(shift_date or "").strip():
         return error("invalid_date")
@@ -19,7 +15,7 @@ def search_date_context(shift_date, locality="Israel", search=None):
     query = (
         "Public holidays, special events, and weather warnings in {0} on {1}"
     ).format(place, shift_date)
-    runner = search or _tavily_search
+    runner = search or _tavily_mcp
     try:
         payload = runner(query)
     except Exception:
@@ -49,27 +45,20 @@ def search_date_context(shift_date, locality="Israel", search=None):
     )
 
 
-def _tavily_search(query):
+def _tavily_mcp(query):
     api_key = os.environ.get("MCP_TAVILY_API_KEY", "").strip()
     if not api_key:
         return None
-    body = json.dumps(
-        {
-            "api_key": api_key,
-            "query": query,
-            "max_results": 3,
-            "include_answer": True,
-            "search_depth": "basic",
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        TAVILY_SEARCH_URL,
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    command = os.environ.get("MCP_TAVILY_COMMAND", "").strip() or bundled_command("tavily_mcp_server.py")
+    from app.mcp.stdio import call_tool
+
+    return call_tool(
+        command,
+        "tavily_search",
+        {"query": query},
+        extra_env={"MCP_TAVILY_API_KEY": api_key},
+        failure_code="tavily_unavailable",
     )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        return json.loads(response.read().decode("utf-8"))
 
 
 def _kind(text):

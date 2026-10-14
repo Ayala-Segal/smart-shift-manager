@@ -1,10 +1,15 @@
-from datetime import date, timedelta
+import csv
+import io
+import json
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from app.auth.models import ROLE_EMPLOYEE, User
 from app.extensions import db
 from app.read_models import ApprovedAssignmentRow, RequestRecommendationRow, ShiftBoardRow, ShiftRequestRow
 
 OPEN_STATUSES = ("open", "partial")
+ISRAEL = ZoneInfo("Asia/Jerusalem")
 
 
 def get_shift_board(start=None, end=None, role=None, statuses=None):
@@ -37,11 +42,57 @@ def board_filters_from_request(args, viewer):
     status = (args.get("status") or "").strip() or None
     statuses = [status] if status else None
     open_only = (args.get("open_only") or "").strip() in {"1", "true", "yes"}
+    include_closed = (args.get("include_closed") or "").strip() in {"1", "true", "yes"}
     if open_only:
         statuses = list(OPEN_STATUSES)
         if viewer.role == ROLE_EMPLOYEE:
             role = viewer.professional_role
+    if include_closed:
+        statuses = ["open", "partial", "closed"]
+        if viewer.role == ROLE_EMPLOYEE:
+            role = viewer.professional_role
     return {"start": start, "end": end, "role": role, "statuses": statuses}
+
+
+def shift_report_csv(rows):
+    """CSV of the shift table: date, staffing, status, and waiting candidates."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            "shift_date",
+            "weekday",
+            "start_time",
+            "end_time",
+            "required_role",
+            "assigned_count",
+            "required_headcount",
+            "status",
+            "waiting_candidates",
+        ]
+    )
+    for row in rows:
+        writer.writerow(
+            [
+                _csv_cell(row.shift_date.isoformat()),
+                _csv_cell(row.weekday),
+                _csv_cell(row.start_time),
+                _csv_cell(row.end_time),
+                _csv_cell(row.required_role),
+                row.assigned_count,
+                row.required_headcount,
+                _csv_cell(row.status),
+                row.waiting_candidates,
+            ]
+        )
+    return buffer.getvalue()
+
+
+def _csv_cell(value):
+    text = str(value if value is not None else "")
+    if text[:1] in ("=", "+", "-", "@"):
+        return "'" + text
+    return text
 
 
 def requests_for_shift(shift_id):
@@ -77,6 +128,7 @@ def shift_detail_payload(row, requests, viewer, recommendations=None):
     for item in requests:
         entry = {
             "request_id": item.request_id,
+            "display_number": item.display_number,
             "request_type": item.request_type,
             "professional_role": item.professional_role,
             "status": item.status,
@@ -97,12 +149,78 @@ def shift_detail_payload(row, requests, viewer, recommendations=None):
             entry["recommendation"] = recommendation.decision
             entry["rationale"] = recommendation.rationale
             entry["hours_warning"] = recommendation.hours_warning
+            entry["findings"] = recommendation_findings(recommendation.sources_json)
         visible.append(entry)
+    today = datetime.now(ISRAEL).date()
     return {
         "shift": _shift_summary(row),
         "registered": visible,
         "assignees": _assignees(row.shift_id, viewer),
+        "registration_open": row.status in OPEN_STATUSES and row.shift_date >= today,
     }
+
+
+def recommendation_findings(sources):
+    """Turn stored tool results into sentences a manager can read."""
+    if not sources:
+        return []
+    if isinstance(sources, str):
+        try:
+            sources = json.loads(sources)
+        except ValueError:
+            return []
+    by_name = {item.get("name"): item for item in sources if isinstance(item, dict)}
+    findings = []
+    availability = by_name.get("check_availability_conflicts")
+    if availability:
+        if availability.get("hard_block"):
+            reasons = "; ".join(availability.get("reasons") or []) or "a hard constraint"
+            findings.append("Availability blocks this request: {0}.".format(reasons))
+        elif availability.get("soft_block"):
+            findings.append("The employee prefers not to work this date. That is a warning, not a block.")
+        else:
+            findings.append("No availability conflict was found.")
+    hours = by_name.get("calculate_weekly_hours")
+    if hours:
+        findings.append(
+            "Approved hours are {0}. This shift would bring the week to {1}, and the limit is {2}.".format(
+                hours.get("approved_hours"),
+                hours.get("projected_hours"),
+                hours.get("weekly_limit"),
+            )
+        )
+        if hours.get("exceeds_limit"):
+            findings.append("Weekly hours would pass 42. The request stays open for a manager decision.")
+    tavily = by_name.get("tavily")
+    if tavily:
+        if tavily.get("found"):
+            findings.append(
+                "The date has a {0}: {1}.".format(
+                    tavily.get("kind") or "event",
+                    tavily.get("title") or "details were not titled",
+                )
+            )
+        elif tavily.get("ok"):
+            findings.append("No holiday or exceptional event was found for this date.")
+        else:
+            findings.append("Holiday and event lookup was unavailable, so the recommendation does not use it.")
+    retrieval = by_name.get("retrieval")
+    if retrieval:
+        if retrieval.get("ok"):
+            findings.append(
+                "Semantic profile passages considered: {0}.".format(retrieval.get("passage_count"))
+            )
+        else:
+            findings.append("Evaluation without semantic context. Profile matching was unavailable.")
+    history = by_name.get("approved_history")
+    if history:
+        findings.append(
+            "Approved shifts in the last {0} days: {1}.".format(history.get("days"), history.get("count"))
+        )
+    tools = by_name.get("tools")
+    if tools and not tools.get("ok"):
+        findings.append("Scheduling checks did not finish. A manager still needs to decide.")
+    return findings
 
 
 def _assignees(shift_id, viewer):

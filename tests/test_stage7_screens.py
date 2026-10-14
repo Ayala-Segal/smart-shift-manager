@@ -67,6 +67,25 @@ class Stage7ScreenTests(unittest.TestCase):
         if self._saved_connection is not None:
             os.environ["SOMEE_SQLSERVER_CONNECTION_STRING"] = self._saved_connection
 
+    def test_manager_can_export_the_shift_report(self):
+        self._login("noa@example.com")
+        page = self.client.get("/board")
+        self.assertIn("Export report", page.get_data(as_text=True))
+        exported = self.client.get("/board/export")
+        self.assertEqual(exported.status_code, 200)
+        self.assertEqual(exported.mimetype, "text/csv")
+        self.assertIn("shift-report.csv", exported.headers["Content-Disposition"])
+        text = exported.get_data(as_text=True)
+        self.assertIn("assigned_count", text)
+        self.assertIn("waiting_candidates", text)
+        self.assertIn("2026-10-14", text)
+        self.assertIn("open", text)
+        self.client.post("/sign-out")
+        self._login("ayala@example.com")
+        own_role = self.client.get("/board/export?include_closed=1")
+        self.assertNotIn("shift lead", own_role.get_data(as_text=True))
+        self.assertIn("cashier", own_role.get_data(as_text=True))
+
     def test_approval_updates_the_board_only_after_projection(self):
         request_id = self._assignment(self.employee["user_id"])
         self._login("noa@example.com")
@@ -182,6 +201,12 @@ class Stage7ScreenTests(unittest.TestCase):
         )
         self.assertEqual(swap.status_code, 201, swap.get_json())
         swap_id = swap.get_json()["request_id"]
+        self._login("yael@example.com")
+        accepted = self.client.post(
+            "/commands/swaps/" + swap_id + "/colleague",
+            json={"action": "approve"},
+        )
+        self.assertEqual(accepted.status_code, 201, accepted.get_json())
         self._recommend(
             swap_id,
             self.shift_id,
@@ -283,6 +308,61 @@ class Stage7ScreenTests(unittest.TestCase):
         search = self.client.get("/search?mode=week&date=" + shift_day)
         self.assertIn(shift_day, search.get_data(as_text=True))
         self.assertNotIn("shift lead", search.get_data(as_text=True))
+
+    def test_past_shift_is_closed_and_the_manager_can_open_the_roster(self):
+        with self.app.app_context():
+            past = define_shift(
+                actor_id="manager-seed",
+                actor_role="manager",
+                shift_date="2020-01-02",
+                start_time="09:00",
+                end_time="17:00",
+                required_role="cashier",
+                required_headcount=1,
+                today=date(2019, 12, 1),
+            )
+            project_shift_board()
+            past_id = past.aggregate_id
+        self._login("ayala@example.com")
+        refused = self.client.post(
+            "/commands/assignments",
+            json={"shift_id": past_id, "note": "too late"},
+        )
+        self.assertEqual(refused.status_code, 400)
+        self.assertIn("current or future", refused.get_json()["error"])
+        card = self.client.get("/shifts/" + past_id)
+        self.assertIn("registration is closed", card.get_data(as_text=True))
+        self.assertNotIn("Submit request", card.get_data(as_text=True))
+        search = self.client.get("/search?start=2020-01-01&end=2020-01-03")
+        page = search.get_data(as_text=True)
+        self.assertIn("Past shifts", page)
+        self.assertIn("2020-01-02", page)
+
+        self._login("noa@example.com")
+        roster = self.client.get("/employees")
+        text = roster.get_data(as_text=True)
+        self.assertEqual(roster.status_code, 200)
+        self.assertIn("Ayala Levi", text)
+        self.assertIn("ayala@example.com", text)
+        self.assertIn("cashier", text)
+        self._login("ayala@example.com")
+        self.assertEqual(self.client.get("/employees").status_code, 403)
+
+    def test_screen_request_reaches_the_manager_after_the_agent_runs(self):
+        self._login("ayala@example.com")
+        submitted = self.client.post(
+            "/shifts/" + self.shift_id + "/request",
+            data={"note": "I can cover"},
+            follow_redirects=True,
+        )
+        self.assertEqual(submitted.status_code, 200)
+        self.assertIn("Request #0", submitted.get_data(as_text=True))
+        self._login("noa@example.com")
+        page = self.client.get("/decisions")
+        text = page.get_data(as_text=True)
+        self.assertIn("Agent recommendation", text)
+        self.assertIn("Approve", text)
+        self.assertNotIn("No requests are waiting for a decision.", text)
 
     def _assignment(self, employee_id, shift_id=None):
         self._login_employee(employee_id)
