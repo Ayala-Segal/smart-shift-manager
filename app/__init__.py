@@ -1,7 +1,9 @@
 import os
+from pathlib import Path
 from uuid import uuid4
 
 import click
+from dotenv import load_dotenv
 from flask import Flask, jsonify, redirect, request
 from flask_login import current_user
 from sqlalchemy.pool import StaticPool
@@ -13,6 +15,8 @@ from app.event_store import (
     append_event,
     sqlalchemy_uri_from_somee,
 )
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
 def create_app():

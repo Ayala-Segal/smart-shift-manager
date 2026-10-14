@@ -248,7 +248,7 @@ class McpToolTests(unittest.TestCase):
 
     def _assert_stdio_lists_tools(self):
         env = os.environ.copy()
-        env.pop("SOMEE_SQLSERVER_CONNECTION_STRING", None)
+        env["SOMEE_SQLSERVER_CONNECTION_STRING"] = ""
         process = subprocess.Popen(
             [sys.executable, "mcp_server.py"],
             stdin=subprocess.PIPE,
