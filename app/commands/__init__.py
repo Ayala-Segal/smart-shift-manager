@@ -10,6 +10,7 @@ from app.commands.submit_requests import (
     request_swap,
     respond_to_swap,
     submit_availability,
+    withdraw_availability,
 )
 from app.event_store import ASSIGNMENT_APPROVED, SWAP_APPROVED
 from app.notifications.dispatch import dispatch_notifications
@@ -39,8 +40,30 @@ def availability():
             shift_date=body.get("date"),
             start_date=body.get("start_date"),
             end_date=body.get("end_date"),
+            weekdays=body.get("weekdays") or [],
+            time_start=body.get("time_start") or "",
+            time_end=body.get("time_end") or "",
+            nights=bool(body.get("nights")),
+            shabbat_eves=bool(body.get("shabbat_eves")),
+            holidays=bool(body.get("holidays")),
+            constraint_id=body.get("constraint_id"),
         )
     )
+
+
+@commands_bp.post("/availability/<constraint_id>/cancel")
+@role_required(ROLE_EMPLOYEE)
+def cancel_availability(constraint_id):
+    try:
+        event = withdraw_availability(
+            actor_id=current_user.user_id,
+            actor_role=current_user.role,
+            constraint_id=constraint_id,
+        )
+    except CommandRejected as error:
+        return jsonify({"error": str(error)}), 400
+    project_shift_board()
+    return jsonify({"constraint_id": event.aggregate_id, "status": "cancelled"}), 201
 
 
 @commands_bp.post("/assignments")
@@ -53,6 +76,7 @@ def assignments():
             actor_role=current_user.role,
             shift_id=body.get("shift_id"),
             note=body.get("note") or "",
+            confirm_constraints=bool(body.get("confirm_constraints")),
         )
     )
 

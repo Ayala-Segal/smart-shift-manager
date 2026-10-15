@@ -39,6 +39,106 @@ class OllamaRationaleTests(unittest.TestCase):
         self.assertEqual(len(text), 500)
         self.assertTrue(text.endswith("..."))
 
+    def test_a_copied_reply_keeps_the_rule_text(self):
+        fallback = _fallback()
+        text, used = rewrite_rationale(fallback, _hour_facts(), generate=lambda fallback, facts: fallback)
+        self.assertEqual(text, fallback)
+        self.assertFalse(used)
+
+    def test_a_reply_that_invents_an_hours_breach_is_rejected(self):
+        fallback = _fallback()
+        reply = (
+            "Approved. Projected hours exceed the weekly limit. "
+            "Approved hours 10, projected hours 18, shift hours 8, weekly limit 42."
+        )
+        text, used = rewrite_rationale(fallback, _hour_facts(), generate=lambda fallback, facts: reply)
+        self.assertEqual(text, fallback)
+        self.assertFalse(used)
+
+    def test_a_reply_missing_hour_numbers_is_rejected(self):
+        fallback = _fallback()
+        reply = "Approved. The week stays within the limit."
+        text, used = rewrite_rationale(fallback, _hour_facts(), generate=lambda fallback, facts: reply)
+        self.assertEqual(text, fallback)
+        self.assertFalse(used)
+
+    def test_a_reply_within_the_limit_is_accepted(self):
+        fallback = _fallback()
+        reply = (
+            "Approved. The week stays within the limit and does not exceed it. "
+            "Approved hours 10, projected hours 18, shift hours 8, weekly limit 42."
+        )
+        text, used = rewrite_rationale(fallback, _hour_facts(), generate=lambda fallback, facts: reply)
+        self.assertTrue(used)
+        self.assertEqual(text, reply)
+        self.assertLessEqual(len(text), 500)
+
+    def test_a_second_attempt_is_used_when_the_first_fails(self):
+        fallback = _fallback()
+        reply = (
+            "Approved. The week stays within the limit. "
+            "Approved hours 10, projected hours 18, shift hours 8, weekly limit 42."
+        )
+        calls = []
+
+        def generate(fallback, facts):
+            calls.append(1)
+            if len(calls) == 1:
+                raise TimeoutError("ollama is slow")
+            return reply
+
+        text, used = rewrite_rationale(fallback, _hour_facts(), generate=generate)
+        self.assertEqual(calls, [1, 1])
+        self.assertTrue(used)
+        self.assertEqual(text, reply)
+
+    def test_a_rejected_reply_is_retried_once(self):
+        fallback = _fallback()
+        reply = (
+            "Approved. The week stays within the limit. "
+            "Approved hours 10, projected hours 18, shift hours 8, weekly limit 42."
+        )
+        calls = []
+
+        def generate(fallback, facts):
+            calls.append(1)
+            if len(calls) == 1:
+                return fallback
+            return reply
+
+        text, used = rewrite_rationale(fallback, _hour_facts(), generate=generate)
+        self.assertEqual(calls, [1, 1])
+        self.assertTrue(used)
+        self.assertEqual(text, reply)
+
+    def test_two_failed_attempts_keep_the_rule_text(self):
+        fallback = _fallback()
+        calls = []
+
+        def generate(fallback, facts):
+            calls.append(1)
+            raise TimeoutError("ollama is down")
+
+        text, used = rewrite_rationale(fallback, _hour_facts(), generate=generate)
+        self.assertEqual(calls, [1, 1])
+        self.assertEqual(text, fallback)
+        self.assertFalse(used)
+
+
+def _fallback():
+    return "Approved. Approved hours 10, projected hours 18, shift hours 8, weekly limit 42."
+
+
+def _hour_facts():
+    return {
+        "decision": "approve",
+        "approved_hours": 10,
+        "projected_hours": 18,
+        "shift_hours": 8,
+        "weekly_limit": 42,
+        "exceeds_limit": False,
+    }
+
 
 class OllamaCycleTests(unittest.TestCase):
     def test_the_cycle_stores_the_model_wording_and_the_rule_decision(self):

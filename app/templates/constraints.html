@@ -2,17 +2,15 @@
 {% set title = "Constraints" %}
 {% block content %}
 <h1>Constraints</h1>
+<p class="hint">Choose a type, then fill only the limits you care about. Leave a section empty if it does not apply.</p>
+{% if form.constraint_id %}
+<p class="hint">Saving replaces this constraint. A field you clear is removed.</p>
+{% endif %}
 {% if error %}<p class="field-error" role="alert">{{ error }}</p>{% endif %}
 <form method="post" action="{{ url_for('screens.add_constraint') }}" class="panel">
-  <label for="date">Date</label>
-  <input id="date" name="date" type="date" value="{{ form.date or '' }}">
-  {% if errors.date %}<p class="field-error">{{ errors.date }}</p>{% endif %}
-  <p class="hint">Or enter a range instead of one date.</p>
-  <label for="start_date">Start date</label>
-  <input id="start_date" name="start_date" type="date" value="{{ form.start_date or '' }}">
-  <label for="end_date">End date</label>
-  <input id="end_date" name="end_date" type="date" value="{{ form.end_date or '' }}">
-
+  {% if form.constraint_id %}
+  <input type="hidden" name="constraint_id" value="{{ form.constraint_id }}">
+  {% endif %}
   <label for="constraint_type">Type</label>
   <select id="constraint_type" name="constraint_type" required>
     <option value="">Choose a type</option>
@@ -22,10 +20,62 @@
   </select>
   {% if errors.constraint_type %}<p class="field-error">{{ errors.constraint_type }}</p>{% endif %}
 
+  <fieldset class="choice-group">
+    <legend>Dates</legend>
+    <p class="hint">Optional. Leave this empty to apply on every day, for example evenings or nights.</p>
+    <label for="date">One date</label>
+    <input id="date" name="date" type="date" value="{{ form.date or '' }}">
+    {% if errors.date %}<p class="field-error">{{ errors.date }}</p>{% endif %}
+    <div class="time-row">
+      <label for="start_date">From
+        <input id="start_date" name="start_date" type="date" value="{{ form.start_date or '' }}">
+      </label>
+      <label for="end_date">To
+        <input id="end_date" name="end_date" type="date" value="{{ form.end_date or '' }}">
+      </label>
+    </div>
+  </fieldset>
+
+  <fieldset class="choice-group">
+    <legend>Schedule</legend>
+    <p class="hint">Optional. Choose any combination. A night overlaps 22:00–06:00. A Shabbat eve is Friday from 16:00.</p>
+    <div class="weekday-row">
+      {% for day in ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] %}
+      <label class="check" for="weekday-{{ day }}">
+        <input id="weekday-{{ day }}" name="weekdays" type="checkbox" value="{{ day }}" {% if day in (form.weekdays or []) %}checked{% endif %}>
+        {{ day }}
+      </label>
+      {% endfor %}
+    </div>
+    <div class="time-row">
+      <label for="time_start">From
+        <input id="time_start" name="time_start" type="time" value="{{ form.time_start or '' }}">
+      </label>
+      <label for="time_end">To
+        <input id="time_end" name="time_end" type="time" value="{{ form.time_end or '' }}">
+      </label>
+    </div>
+    {% if errors.time_start %}<p class="field-error">{{ errors.time_start }}</p>{% endif %}
+    <div class="flag-row">
+      <label class="check" for="nights">
+        <input id="nights" name="nights" type="checkbox" value="yes" {% if form.nights %}checked{% endif %}>
+        Nights
+      </label>
+      <label class="check" for="shabbat_eves">
+        <input id="shabbat_eves" name="shabbat_eves" type="checkbox" value="yes" {% if form.shabbat_eves %}checked{% endif %}>
+        Shabbat eves
+      </label>
+      <label class="check" for="holidays">
+        <input id="holidays" name="holidays" type="checkbox" value="yes" {% if form.holidays %}checked{% endif %}>
+        Holidays
+      </label>
+    </div>
+  </fieldset>
+
   <label for="note">Note</label>
-  <textarea id="note" name="note" maxlength="300">{{ form.note or '' }}</textarea>
+  <textarea id="note" name="note" maxlength="300" placeholder="Optional. For example, a family event or why these hours do not work.">{{ form.note or '' }}</textarea>
   {% if errors.note %}<p class="field-error">{{ errors.note }}</p>{% endif %}
-  <button type="submit">Save constraint</button>
+  <button type="submit">{% if form.constraint_id %}Replace constraint{% else %}Save constraint{% endif %}</button>
 </form>
 
 <h2>Saved constraints</h2>
@@ -33,15 +83,21 @@
 <div class="table-wrap">
   <table>
     <thead>
-      <tr><th>Start</th><th>End</th><th>Type</th><th>Note</th></tr>
+      <tr><th>When</th><th>Type</th><th>Schedule</th><th>Note</th><th></th></tr>
     </thead>
     <tbody>
       {% for item in constraints %}
       <tr>
-        <td>{{ item.start_date }}</td>
-        <td>{{ item.end_date }}</td>
+        <td>{{ item.when }}</td>
         <td>{{ item.constraint_type }}</td>
+        <td>{{ item.schedule or "Any time" }}</td>
         <td>{{ item.note }}</td>
+        <td class="row-actions">
+          <a class="button-link secondary" href="{{ url_for('screens.edit_constraint', constraint_id=item.constraint_id) }}">Replace</a>
+          <form method="post" action="{{ url_for('screens.cancel_constraint', constraint_id=item.constraint_id) }}">
+            <button type="submit" class="secondary">Cancel</button>
+          </form>
+        </td>
       </tr>
       {% endfor %}
     </tbody>

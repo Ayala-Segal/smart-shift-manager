@@ -70,7 +70,8 @@ def decide_request(*, actor_id, actor_role, request_id, action, note="", expecte
         subject_id = (
             payload["replacement_employee_id"] if request_type == "swap" else payload["employee_id"]
         )
-        _reject_overlap(subject_id, shift)
+        self_scheduled = request_type == "assignment" and requested.actor_id == payload.get("employee_id")
+        _reject_overlap(subject_id, shift, time_off=not self_scheduled)
 
     event_type = {
         ("assignment", "approve"): ASSIGNMENT_APPROVED,
@@ -133,7 +134,7 @@ def _shift_snapshot(shift_id):
     return defined
 
 
-def _reject_overlap(employee_id, shift):
+def _reject_overlap(employee_id, shift, *, time_off=False):
     block = check_availability_conflicts(
         employee_id,
         shift["shift_date"],
@@ -142,9 +143,6 @@ def _reject_overlap(employee_id, shift):
     )
     if not block.get("ok"):
         raise CommandRejected("The availability check is unavailable.")
-    overlap = next(
-        (reason for reason in block["result"]["reasons"] if "overlaps" in reason),
-        None,
-    )
-    if overlap:
-        raise CommandRejected(overlap)
+    for reason in block["result"]["reasons"]:
+        if "overlaps" in reason or (time_off and reason.startswith("The employee is unavailable")):
+            raise CommandRejected(reason)

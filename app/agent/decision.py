@@ -51,7 +51,13 @@ def _rationale(decision, *, role_matches, conflict, hours, tavily, retrieval_ok,
         if hours["result"]["exceeds_limit"]:
             reasons.append("weekly hours would exceed {0}".format(hours["result"]["weekly_limit"]))
         if conflict["result"]["soft_block"]:
-            reasons.append("the employee prefers not to work this date")
+            tool_reasons = conflict["result"]["reasons"]
+            note_reasons = [item for item in tool_reasons if item.startswith("The employee note")]
+            if any(item.startswith("The employee is unavailable") for item in tool_reasons):
+                reasons.append("this conflicts with the employee's constraints")
+            elif any("prefers not" in item for item in tool_reasons) or not note_reasons:
+                reasons.append("the employee prefers not to work this date")
+            reasons.extend(note_reasons)
         if holiday:
             title = tavily["result"].get("title") or "an exceptional event"
             reasons.append("holiday or exceptional event: {0}".format(title))

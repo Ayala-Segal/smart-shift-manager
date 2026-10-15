@@ -5,7 +5,12 @@
 <p><a href="{{ url_for('screens.board') }}">Back to the board</a></p>
 <h1>{{ shift.weekday }} {{ shift.shift_date }}</h1>
 <p class="meta">{{ shift.start_time }}–{{ shift.end_time }} · {{ shift.required_role }} · {{ shift.assigned_count }} / {{ shift.required_headcount }}</p>
-<p><span class="pill {{ shift.status }}">{{ shift.status }}</span> · {{ shift.waiting_candidates }} waiting</p>
+<p><span class="pill {{ shift.status }}">{{ shift.status }}</span></p>
+{% if current_user.role == "employee" %}
+<p>{{ shift.waiting_candidates }} {% if shift.waiting_candidates == 1 %}employee is{% else %}employees are{% endif %} waiting for approval on this shift.</p>
+{% else %}
+<p>{{ shift.waiting_candidates }} waiting for approval.</p>
+{% endif %}
 {% if shift.note %}<p>{{ shift.note }}</p>{% endif %}
 {% if error %}<p class="field-error" role="alert">{{ error }}</p>{% endif %}
 
@@ -52,16 +57,20 @@
     </tbody>
   </table>
 </div>
-{% else %}
+{% elif current_user.role != "employee" %}
 <p class="empty">No requests yet.</p>
 {% endif %}
 
 {% if current_user.role == "employee" and detail.registration_open and detail.role_matches %}
 <h2>Request this shift</h2>
 <form method="post" action="{{ url_for('screens.request_shift', shift_id=shift.shift_id) }}">
+  {% if confirm_constraints %}
+  <p class="field-error" role="alert">This conflicts with your constraints. Do you still want to proceed?</p>
+  <input type="hidden" name="confirm_constraints" value="yes">
+  {% endif %}
   <label for="note">Note</label>
-  <textarea id="note" name="note" maxlength="300"></textarea>
-  <button type="submit">Submit request</button>
+  <textarea id="note" name="note" maxlength="300">{{ request_note or '' }}</textarea>
+  <button type="submit">{% if confirm_constraints %}Proceed{% else %}Submit request{% endif %}</button>
 </form>
 {% elif current_user.role == "employee" and detail.registration_open %}
 <p class="empty">Your professional role does not match this shift. Only a {{ shift.required_role }} can request it.</p>

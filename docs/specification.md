@@ -296,7 +296,8 @@ A uniqueness constraint on `(aggregate_id, version)` prevents two concurrent wri
 | `ShiftDefined` | A manager created a shift |
 | `ShiftUpdated` | Hours, role, headcount, or note changed |
 | `ShiftCancelled` | A shift was cancelled |
-| `AvailabilityConstraintSubmitted` | An employee added or updated a constraint |
+| `AvailabilityConstraintSubmitted` | An employee added or replaced a constraint |
+| `AvailabilityConstraintWithdrawn` | An employee cancelled a constraint |
 | `AssignmentRequested` | An employee requested an assignment |
 | `SwapRequested` | An employee requested a swap |
 | `AgentEvaluationCompleted` | The agent finished an evaluation |
@@ -315,6 +316,7 @@ A uniqueness constraint on `(aggregate_id, version)` prevents two concurrent wri
 | `UpdateShift` | Manager | `ShiftUpdated` |
 | `CancelShift` | Manager | `ShiftCancelled` |
 | `SubmitAvailability` | Employee | `AvailabilityConstraintSubmitted` |
+| `WithdrawAvailability` | Employee | `AvailabilityConstraintWithdrawn` |
 | `RequestAssignment` | Employee | `AssignmentRequested` |
 | `RequestSwap` | Employee | `SwapRequested` |
 | `RecordAgentEvaluation` | Agent | `AgentEvaluationCompleted` |

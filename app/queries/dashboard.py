@@ -167,6 +167,29 @@ def incoming_swaps(employee_id):
     return [_request_summary(row) for row in rows]
 
 
+def _constraint_when(row):
+    if row.start_date is None and row.end_date is None:
+        return "Any date"
+    if row.start_date == row.end_date:
+        return row.start_date.isoformat()
+    return "{0} – {1}".format(row.start_date.isoformat(), row.end_date.isoformat())
+
+
+def _constraint_schedule(row):
+    parts = []
+    if row.weekdays:
+        parts.append(row.weekdays)
+    if row.time_start and row.time_end:
+        parts.append("{0}–{1}".format(row.time_start, row.time_end))
+    if row.nights:
+        parts.append("nights")
+    if row.shabbat_eves:
+        parts.append("Shabbat eves")
+    if row.holidays:
+        parts.append("holidays")
+    return ", ".join(parts)
+
+
 def constraints_for(employee_id):
     ensure_read_models()
     rows = (
@@ -178,10 +201,18 @@ def constraints_for(employee_id):
     return [
         {
             "constraint_id": row.constraint_id,
-            "start_date": row.start_date.isoformat(),
-            "end_date": row.end_date.isoformat(),
+            "start_date": row.start_date.isoformat() if row.start_date else "",
+            "end_date": row.end_date.isoformat() if row.end_date else "",
+            "when": _constraint_when(row),
             "constraint_type": row.constraint_type,
             "note": row.note,
+            "weekdays": row.weekdays or "",
+            "time_start": row.time_start or "",
+            "time_end": row.time_end or "",
+            "nights": bool(row.nights),
+            "shabbat_eves": bool(row.shabbat_eves),
+            "holidays": bool(row.holidays),
+            "schedule": _constraint_schedule(row),
         }
         for row in rows
     ]

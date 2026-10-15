@@ -71,7 +71,7 @@ The agent is a service identity, not a human user. It can read requests, profile
 | BR-6 | An employee can request assignment only to an open or partial shift, and only when their professional role matches the required role. |
 | BR-7 | A swap is allowed only between two qualified employees, only for a future shift, and only after an explicit request. |
 | BR-8 | A recommendation informs the manager. The assignment takes effect only after manager approval. |
-| BR-9 | An `unavailable` constraint on the shift date blocks an approve recommendation. A `prefer not` constraint produces a warning. A `prefer` constraint does not block and does not warn. |
+| BR-9 | Availability constraints apply when a manager assigns an employee. An `unavailable` constraint blocks that assignment and its approve recommendation. A `prefer not` constraint produces a warning. A `prefer` constraint does not block and does not warn. An employee who requests a conflicting shift is warned and can confirm to proceed. |
 | BR-10 | A stored event is not deleted and is not edited. A correction is a new event. |
 
 A work week runs from Sunday 00:00 through Saturday 23:59, Israel time.
@@ -88,7 +88,7 @@ Required columns: date and weekday, hours, role, assigned / required, status, nu
 
 **FR-2.** The user can filter by start date, end date, role, and status. An open-shift search limits results to open or partial shifts.
 
-**FR-3.** Selecting a row opens a shift card with the shift definition, approved assignees, waiting requests, and the agent recommendation for each request. An employee sees assignees by first name and role only, and does not see recommendations about other employees.
+**FR-3.** Selecting a row opens a shift card with the shift definition, approved assignees, waiting requests, and the agent recommendation for each request. An employee sees assignees by first name and role only, sees how many employees are waiting for approval on that shift, and does not see who else is waiting or recommendations about other employees.
 
 **FR-4.** An empty table shows "No shifts in the selected range" and a link to widen the range. The manager also sees a shortcut to define a shift.
 
@@ -140,9 +140,9 @@ Required columns: date and weekday, hours, role, assigned / required, status, nu
 
 **FR-22.** Each assignment or swap request that has no recommendation yet receives exactly one recommendation: `approve`, `reject`, or `warning`, plus a rationale of at most 500 characters and the sources used.
 
-**FR-23.** The recommendation is `reject` when shifts overlap, rest is under 8 hours, an `unavailable` constraint applies, or the role does not match.
+**FR-23.** The recommendation is `reject` when shifts overlap, rest is under 8 hours, or the role does not match. An `unavailable` constraint also rejects the recommendation when a manager placed the employee on the request. An employee self-request that conflicts with their own constraints is a warning after they confirm.
 
-**FR-24.** The recommendation is `warning` when the request is otherwise eligible and weekly hours would exceed 42, a `prefer not` constraint applies, or a holiday or exceptional event is found for the date.
+**FR-24.** The recommendation is `warning` when the request is otherwise eligible and weekly hours would exceed 42, a holiday or exceptional event is found for the date, a `prefer not` constraint applies to a manager assignment, or an employee confirmed a request that conflicts with their constraints.
 
 **FR-25.** The recommendation is `approve` when the request is eligible and none of the warning conditions apply.
 
