@@ -7,7 +7,7 @@ from uuid import uuid4
 from sqlalchemy.exc import IntegrityError
 
 from app.agent.decision import decide
-from app.agent.ollama import rationale_facts, rewrite_rationale
+from app.agent.ollama import classify_constraint_note, rationale_facts, rewrite_rationale
 from app.auth.models import User
 from app.event_store import (
     AGENT_EVALUATION_COMPLETED,
@@ -22,7 +22,7 @@ from app.projections import ensure_read_models, project_shift_board
 from app.read_models import ApprovedAssignmentRow, EvaluationLock, ShiftBoardRow
 from app.retrieval.service import describe_shift
 from app.retrieval.store import RetrievalUnavailable
-from app.tools.conflicts import check_availability_conflicts
+from app.tools.conflicts import check_availability_conflicts, shift_matches_label, soften_own_constraint_blocks
 from app.tools.hours import calculate_weekly_hours
 from app.tools.schedule import duration_hours, week_start_sunday
 from app.tools.tavily import search_date_context
@@ -40,6 +40,7 @@ def run_evaluation_cycle(
     search=None,
     retrieve=None,
     narrate=None,
+    classify=None,
     run_id=None,
 ):
     availability = availability or check_availability_conflicts
@@ -47,6 +48,7 @@ def run_evaluation_cycle(
     search = search or search_date_context
     retrieve = retrieve or _retrieve
     narrate = narrate or rewrite_rationale
+    classify = classify or classify_constraint_note
     run_id = run_id or uuid4().hex
     evaluated = 0
     with app.app_context():
@@ -65,6 +67,7 @@ def run_evaluation_cycle(
                     search=search,
                     retrieve=retrieve,
                     narrate=narrate,
+                    classify=classify,
                 )
             except Exception as error:
                 db.session.rollback()
@@ -90,7 +93,7 @@ def run_evaluation_cycle(
     return evaluated
 
 
-def _evaluate_one(app, request, *, availability, weekly_hours, search, retrieve, narrate):
+def _evaluate_one(app, request, *, availability, weekly_hours, search, retrieve, narrate, classify):
     if _already_evaluated(request["request_id"]):
         return None
     shift = db.session.get(ShiftBoardRow, request["payload"]["shift_id"])
@@ -125,6 +128,27 @@ def _evaluate_one(app, request, *, availability, weekly_hours, search, retrieve,
     person = db.session.get(User, subject_id)
     locality = (getattr(person, "locality", None) or "Israel").strip() or "Israel"
     tavily = _call_search(search, shift.shift_date.isoformat(), locality)
+    holiday_found = bool(tavily.get("ok") and (tavily.get("result") or {}).get("found"))
+    if holiday_found:
+        again = availability(
+            subject_id,
+            shift.shift_date.isoformat(),
+            shift.start_time,
+            shift.end_time,
+            holiday=True,
+        )
+        if again.get("ok"):
+            conflict = again
+    apply_constraint_notes(
+        conflict,
+        shift_date=shift.shift_date.isoformat(),
+        start_time=shift.start_time,
+        end_time=shift.end_time,
+        holiday=holiday_found,
+        classify=classify,
+    )
+    if _employee_scheduled_self(request):
+        soften_own_constraint_blocks(conflict)
     retrieval_ok, passage_count = _passages(app, retrieve, subject_id, shift)
     role_matches = role_name == shift.required_role
     choice = decide(
@@ -226,10 +250,17 @@ def _pending_requests():
                 "request_id": event.aggregate_id,
                 "aggregate_type": event.aggregate_type,
                 "request_type": "swap" if event.event_type == SWAP_REQUESTED else "assignment",
+                "actor_id": event.actor_id,
                 "payload": json.loads(event.payload_json),
             }
         )
     return pending
+
+
+def _employee_scheduled_self(request):
+    """An employee who requests their own shift already knows their availability."""
+    payload = request.get("payload") or {}
+    return request.get("request_type") == "assignment" and request.get("actor_id") == payload.get("employee_id")
 
 
 def _subject(request):
@@ -311,6 +342,52 @@ def _sources(conflict, hours, tavily, retrieval_ok, passage_count, history):
         {"name": "retrieval", "ok": retrieval_ok, "passage_count": passage_count},
         {"name": "approved_history", "days": HISTORY_DAYS, "count": history},
     ]
+    notes = conflict["result"].get("constraint_notes") or []
+    if notes:
+        sources.append({"name": "constraint_notes", "ok": True, "notes": notes})
+    return sources
+
+
+def apply_constraint_notes(conflict, *, shift_date, start_time, end_time, holiday, classify):
+    """Fold a classified note into the conflict. The rules still choose the decision."""
+    result = conflict.setdefault("result", {})
+    shown = []
+    reasons = {
+        "nights": "The employee note limits night shifts.",
+        "shabbat_eve": "The employee note limits Shabbat eves.",
+        "holiday": "The employee note limits holidays.",
+    }
+    for item in result.get("notes") or []:
+        note = " ".join(str(item.get("note") or "").split())
+        if not note:
+            continue
+        try:
+            label = classify(note)
+        except Exception:
+            label = "personal"
+        if label not in reasons:
+            label = "personal"
+        shown.append(
+            {
+                "note": note,
+                "label": label,
+                "constraint_type": item.get("constraint_type") or "",
+            }
+        )
+        if label == "personal":
+            continue
+        if not shift_matches_label(label, shift_date, start_time, end_time, holiday):
+            continue
+        reason = reasons[label]
+        if reason not in result.setdefault("reasons", []):
+            result["reasons"].append(reason)
+        if item.get("constraint_type") == "unavailable":
+            result["hard_block"] = True
+        else:
+            result["soft_block"] = True
+    if shown:
+        result["constraint_notes"] = shown
+    return conflict
 
 
 def _already_evaluated(request_id):

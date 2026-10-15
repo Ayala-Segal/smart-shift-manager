@@ -95,6 +95,7 @@ Command handlers do not update read tables.
 | `UpdateShift` | Manager | `ShiftUpdated` |
 | `CancelShift` | Manager | `ShiftCancelled` |
 | `SubmitAvailability` | Employee | `AvailabilityConstraintSubmitted` |
+| `WithdrawAvailability` | Employee | `AvailabilityConstraintWithdrawn` |
 | `RequestAssignment` | Employee | `AssignmentRequested` |
 | `RequestSwap` | Employee | `SwapRequested` |
 | `RecordAgentEvaluation` | Agent | `AgentEvaluationCompleted` |
@@ -156,7 +157,8 @@ A unique constraint on `(aggregate_id, version)` stops two writers from committi
 | `ShiftDefined` | Manager created a shift |
 | `ShiftUpdated` | Hours, role, headcount, or note changed |
 | `ShiftCancelled` | Shift cancelled |
-| `AvailabilityConstraintSubmitted` | Employee added or updated a constraint |
+| `AvailabilityConstraintSubmitted` | Employee added or replaced a constraint |
+| `AvailabilityConstraintWithdrawn` | Employee cancelled a constraint |
 | `AssignmentRequested` | Employee requested assignment |
 | `SwapRequested` | Employee requested a swap |
 | `AgentEvaluationCompleted` | Agent finished an evaluation |

@@ -12,6 +12,7 @@ from app.event_store import (
     AGGREGATE_SWAP_REQUEST,
     ASSIGNMENT_REQUESTED,
     AVAILABILITY_CONSTRAINT_SUBMITTED,
+    AVAILABILITY_CONSTRAINT_WITHDRAWN,
     SHIFT_DEFINED,
     SWAP_COLLEAGUE_APPROVED,
     SWAP_COLLEAGUE_REJECTED,
@@ -20,15 +21,34 @@ from app.event_store import (
     append_event,
 )
 from app.extensions import db
-from app.tools.conflicts import check_availability_conflicts
+from app.tools.conflicts import CONSTRAINT_REASON_PREFIXES, check_availability_conflicts
+from app.tools.schedule import parse_minutes
 
 ISRAEL = ZoneInfo("Asia/Jerusalem")
 WAITING = "Waiting for agent evaluation"
 WAITING_FOR_EMPLOYEE = "Waiting for employee approval"
 CONSTRAINT_TYPES = frozenset({"unavailable", "prefer", "prefer not"})
+CONSTRAINT_CONFLICT_PROMPT = "This conflicts with your constraints. Do you still want to proceed?"
+WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 
-def submit_availability(*, actor_id, actor_role, constraint_type, note="", shift_date=None, start_date=None, end_date=None):
+def submit_availability(
+    *,
+    actor_id,
+    actor_role,
+    constraint_type,
+    note="",
+    shift_date=None,
+    start_date=None,
+    end_date=None,
+    weekdays=None,
+    time_start="",
+    time_end="",
+    nights=False,
+    shabbat_eves=False,
+    holidays=False,
+    constraint_id=None,
+):
     if actor_role != ROLE_EMPLOYEE:
         raise CommandRejected("Only an employee can submit an availability constraint.")
     if constraint_type not in CONSTRAINT_TYPES:
@@ -37,23 +57,51 @@ def submit_availability(*, actor_id, actor_role, constraint_type, note="", shift
     if len(stored_note) > 300:
         raise CommandRejected("The note must be at most 300 characters.")
     start, end = _constraint_range(shift_date, start_date, end_date)
-    constraint_id = "constraint-" + uuid4().hex[:8]
+    clock_start, clock_end = _clock_pair(time_start, time_end)
+    replacing = (constraint_id or "").strip()
+    if replacing:
+        _owned_constraint(replacing, actor_id)
+        constraint_id = replacing
+    else:
+        constraint_id = "constraint-" + uuid4().hex[:8]
     return append_event(
         aggregate_type=AGGREGATE_EMPLOYEE_AVAILABILITY,
         aggregate_id=constraint_id,
         event_type=AVAILABILITY_CONSTRAINT_SUBMITTED,
         payload={
             "employee_id": actor_id,
-            "start_date": start.isoformat(),
-            "end_date": end.isoformat(),
+            "start_date": start.isoformat() if start else None,
+            "end_date": end.isoformat() if end else None,
             "constraint_type": constraint_type,
             "note": stored_note,
+            "weekdays": _weekdays(weekdays),
+            "time_start": clock_start,
+            "time_end": clock_end,
+            "nights": bool(nights),
+            "shabbat_eves": bool(shabbat_eves),
+            "holidays": bool(holidays),
         },
         actor_id=actor_id,
     )
 
 
-def request_assignment(*, actor_id, actor_role, shift_id, note="", today=None):
+def withdraw_availability(*, actor_id, actor_role, constraint_id):
+    if actor_role != ROLE_EMPLOYEE:
+        raise CommandRejected("Only an employee can cancel an availability constraint.")
+    target = (constraint_id or "").strip()
+    if not target:
+        raise CommandRejected("The constraint does not exist.")
+    _owned_constraint(target, actor_id)
+    return append_event(
+        aggregate_type=AGGREGATE_EMPLOYEE_AVAILABILITY,
+        aggregate_id=target,
+        event_type=AVAILABILITY_CONSTRAINT_WITHDRAWN,
+        payload={"employee_id": actor_id},
+        actor_id=actor_id,
+    )
+
+
+def request_assignment(*, actor_id, actor_role, shift_id, note="", today=None, confirm_constraints=False):
     if actor_role != ROLE_EMPLOYEE:
         raise CommandRejected("Only an employee can request an assignment.")
     return _queue_assignment(
@@ -62,12 +110,24 @@ def request_assignment(*, actor_id, actor_role, shift_id, note="", today=None):
         shift_id=shift_id,
         note=note,
         today=today,
+        confirm_constraints=confirm_constraints,
     )
 
 
-def _queue_assignment(*, employee_id, actor_id, shift_id, note, today):
+def _queue_assignment(
+    *,
+    employee_id,
+    actor_id,
+    shift_id,
+    note,
+    today,
+    enforce_time_off=False,
+    confirm_constraints=False,
+):
     employee = _active_employee(employee_id)
     shift = _defined_shift(shift_id)
+    if enforce_time_off:
+        _reject_time_off(employee_id, shift)
     current_day = today or datetime.now(ISRAEL).date()
     if date.fromisoformat(shift["shift_date"]) < current_day:
         raise CommandRejected("Assignment requests are only accepted for a current or future shift.")
@@ -80,20 +140,28 @@ def _queue_assignment(*, employee_id, actor_id, shift_id, note, today):
     stored_note = note or ""
     if len(stored_note) > 300:
         raise CommandRejected("The note must be at most 300 characters.")
+    override = False
+    if not enforce_time_off and actor_id == employee_id:
+        override = _has_constraint_conflict(employee_id, shift)
+        if override and not confirm_constraints:
+            raise CommandRejected(CONSTRAINT_CONFLICT_PROMPT)
     request_id = "request-" + uuid4().hex[:8]
+    payload = {
+        "shift_id": shift_id,
+        "employee_id": employee_id,
+        "full_name": employee.full_name,
+        "professional_role": employee.professional_role,
+        "note": stored_note,
+        "status": WAITING,
+        "display_number": _next_display_number(),
+    }
+    if override:
+        payload["constraint_override"] = True
     return append_event(
         aggregate_type=AGGREGATE_ASSIGNMENT_REQUEST,
         aggregate_id=request_id,
         event_type=ASSIGNMENT_REQUESTED,
-        payload={
-            "shift_id": shift_id,
-            "employee_id": employee_id,
-            "full_name": employee.full_name,
-            "professional_role": employee.professional_role,
-            "note": stored_note,
-            "status": WAITING,
-            "display_number": _next_display_number(),
-        },
+        payload=payload,
         actor_id=actor_id,
     )
 
@@ -108,6 +176,7 @@ def register_employee(*, actor_id, actor_role, shift_id, employee_id, note="", t
         shift_id=shift_id,
         note=note,
         today=today,
+        enforce_time_off=True,
     )
 
 
@@ -242,12 +311,106 @@ def _has_assignment_request(employee_id, shift_id):
     return False
 
 
+def _has_constraint_conflict(employee_id, shift):
+    from app.agent.cycle import apply_constraint_notes
+    from app.agent.ollama import classify_constraint_note
+
+    block = check_availability_conflicts(
+        employee_id,
+        shift["shift_date"],
+        shift["start_time"],
+        shift["end_time"],
+    )
+    if not block.get("ok"):
+        raise CommandRejected("The availability check is unavailable.")
+    apply_constraint_notes(
+        block,
+        shift_date=shift["shift_date"],
+        start_time=shift["start_time"],
+        end_time=shift["end_time"],
+        holiday=False,
+        classify=classify_constraint_note,
+    )
+    reasons = block["result"]["reasons"]
+    return any(str(reason).startswith(CONSTRAINT_REASON_PREFIXES) for reason in reasons)
+
+
+def _reject_time_off(employee_id, shift):
+    block = check_availability_conflicts(
+        employee_id,
+        shift["shift_date"],
+        shift["start_time"],
+        shift["end_time"],
+    )
+    if not block.get("ok"):
+        raise CommandRejected("The availability check is unavailable.")
+    for reason in block["result"]["reasons"]:
+        if reason.startswith("The employee is unavailable"):
+            raise CommandRejected(reason)
+
+
+def _owned_constraint(constraint_id, actor_id):
+    events = (
+        db.session.query(Event)
+        .filter(
+            Event.aggregate_type == AGGREGATE_EMPLOYEE_AVAILABILITY,
+            Event.aggregate_id == constraint_id,
+        )
+        .order_by(Event.version)
+        .all()
+    )
+    if not events:
+        raise CommandRejected("The constraint does not exist.")
+    current = None
+    withdrawn = False
+    for event in events:
+        if event.event_type == AVAILABILITY_CONSTRAINT_SUBMITTED:
+            current = json.loads(event.payload_json)
+            withdrawn = False
+        elif event.event_type == AVAILABILITY_CONSTRAINT_WITHDRAWN:
+            withdrawn = True
+    if current is None or current.get("employee_id") != actor_id:
+        raise CommandRejected("The constraint does not exist.")
+    if withdrawn:
+        raise CommandRejected("The constraint is already cancelled.")
+    return current
+
+
+def _weekdays(value):
+    if not value:
+        return ""
+    if isinstance(value, str):
+        parts = [item.strip().lower() for item in value.split(",") if item.strip()]
+    else:
+        parts = [str(item).strip().lower() for item in value if str(item).strip()]
+    unknown = [item for item in parts if item not in WEEKDAYS]
+    if unknown:
+        raise CommandRejected("Weekdays must be mon, tue, wed, thu, fri, sat, or sun.")
+    return ",".join(day for day in WEEKDAYS if day in parts)
+
+
+def _clock_pair(start, end):
+    clock_start = (start or "").strip()
+    clock_end = (end or "").strip()
+    if not clock_start and not clock_end:
+        return "", ""
+    if (
+        parse_minutes(clock_start) is None
+        or parse_minutes(clock_end) is None
+        or parse_minutes(clock_start) == parse_minutes(clock_end)
+    ):
+        raise CommandRejected("Enter both a start time and an end time.")
+    return clock_start[:5], clock_end[:5]
+
+
 def _constraint_range(shift_date, start_date, end_date):
     if shift_date:
         day = _parse_date(shift_date, "date")
         return day, day
+    if not start_date and not end_date:
+        return None, None
     if not start_date or not end_date:
-        raise CommandRejected("Provide a date, or both a start date and an end date.")
+        raise CommandRejected("Provide both a start date and an end date.")
     start = _parse_date(start_date, "start date")
     end = _parse_date(end_date, "end date")
     if end < start:

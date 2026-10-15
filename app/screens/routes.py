@@ -12,10 +12,12 @@ from app.commands.decide_request import decide_request
 from app.commands.define_shift import CommandRejected, define_shift
 from app.commands.submit_requests import (
     register_employee,
+    CONSTRAINT_CONFLICT_PROMPT,
     request_assignment,
     request_swap,
     respond_to_swap,
     submit_availability,
+    withdraw_availability,
 )
 from app.event_store import ASSIGNMENT_APPROVED, ASSIGNMENT_REQUESTED, SWAP_APPROVED, SWAP_COLLEAGUE_APPROVED
 from app.extensions import db
@@ -227,12 +229,14 @@ def shift_card(shift_id):
 @screen_role(ROLE_EMPLOYEE)
 def request_shift(shift_id):
     note = request.form.get("note") or ""
+    confirmed = request.form.get("confirm_constraints") == "yes"
     try:
         event = request_assignment(
             actor_id=current_user.user_id,
             actor_role=current_user.role,
             shift_id=shift_id,
             note=note,
+            confirm_constraints=confirmed,
         )
     except CommandRejected as error:
         row = db.session.get(ShiftBoardRow, shift_id)
@@ -244,10 +248,13 @@ def request_shift(shift_id):
             current_user,
             recommendations_for(shift_id),
         )
+        conflict = str(error) == CONSTRAINT_CONFLICT_PROMPT
         return render_template(
             "shift_card.html",
             detail=detail,
-            error=str(error),
+            error="" if conflict else str(error),
+            confirm_constraints=conflict,
+            request_note=note,
             candidates=_matching_employees(row.required_role),
         ), 400
     project_shift_board()
@@ -360,6 +367,13 @@ def add_constraint():
         "end_date": request.form.get("end_date") or "",
         "constraint_type": request.form.get("constraint_type") or "",
         "note": request.form.get("note") or "",
+        "weekdays": request.form.getlist("weekdays"),
+        "time_start": request.form.get("time_start") or "",
+        "time_end": request.form.get("time_end") or "",
+        "nights": request.form.get("nights") == "yes",
+        "shabbat_eves": request.form.get("shabbat_eves") == "yes",
+        "holidays": request.form.get("holidays") == "yes",
+        "constraint_id": (request.form.get("constraint_id") or "").strip(),
     }
     try:
         event = submit_availability(
@@ -370,6 +384,13 @@ def add_constraint():
             shift_date=form["date"] or None,
             start_date=form["start_date"] or None,
             end_date=form["end_date"] or None,
+            weekdays=form["weekdays"],
+            time_start=form["time_start"],
+            time_end=form["time_end"],
+            nights=form["nights"],
+            shabbat_eves=form["shabbat_eves"],
+            holidays=form["holidays"],
+            constraint_id=form.get("constraint_id") or None,
         )
     except CommandRejected as error:
         message = str(error)
@@ -381,7 +402,58 @@ def add_constraint():
             error="" if _constraint_field(message) else message,
         ), 400
     project_shift_board()
-    flash("Constraint {0} is stored.".format(event.aggregate_id))
+    if form["constraint_id"]:
+        flash("Constraint {0} is replaced.".format(event.aggregate_id))
+    else:
+        flash("Constraint {0} is stored.".format(event.aggregate_id))
+    return redirect(url_for("screens.constraints"))
+
+
+@screens_bp.get("/constraints/<constraint_id>/edit")
+@screen_role(ROLE_EMPLOYEE)
+def edit_constraint(constraint_id):
+    match = _own_constraint(constraint_id)
+    if match is None:
+        flash("The constraint does not exist.")
+        return redirect(url_for("screens.constraints"))
+    same_day = match["start_date"] and match["start_date"] == match["end_date"]
+    form = {
+        "constraint_id": constraint_id,
+        "date": match["start_date"] if same_day else "",
+        "start_date": "" if same_day else match["start_date"],
+        "end_date": "" if same_day else match["end_date"],
+        "constraint_type": match["constraint_type"],
+        "note": match["note"],
+        "weekdays": [part for part in match["weekdays"].split(",") if part],
+        "time_start": match["time_start"],
+        "time_end": match["time_end"],
+        "nights": match["nights"],
+        "shabbat_eves": match["shabbat_eves"],
+        "holidays": match["holidays"],
+    }
+    return render_template(
+        "constraints.html",
+        constraints=constraints_for(current_user.user_id),
+        errors={},
+        form=form,
+        error="",
+    )
+
+
+@screens_bp.post("/constraints/<constraint_id>/cancel")
+@screen_role(ROLE_EMPLOYEE)
+def cancel_constraint(constraint_id):
+    try:
+        event = withdraw_availability(
+            actor_id=current_user.user_id,
+            actor_role=current_user.role,
+            constraint_id=constraint_id,
+        )
+    except CommandRejected as error:
+        flash(str(error))
+        return redirect(url_for("screens.constraints"))
+    project_shift_board()
+    flash("Constraint {0} is cancelled.".format(event.aggregate_id))
     return redirect(url_for("screens.constraints"))
 
 
@@ -616,12 +688,21 @@ def _field_for(message):
     return None
 
 
+def _own_constraint(constraint_id):
+    for item in constraints_for(current_user.user_id):
+        if item["constraint_id"] == constraint_id:
+            return item
+    return None
+
+
 def _constraint_field(message):
     text = message.lower()
     if "type" in text:
         return "constraint_type"
     if "note" in text:
         return "note"
+    if "time" in text or "weekday" in text:
+        return "time_start"
     if "date" in text:
         return "date"
     return None

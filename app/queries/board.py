@@ -134,8 +134,10 @@ def shift_detail_payload(row, requests, viewer, recommendations=None):
             "status": item.status,
         }
         if viewer.role == ROLE_EMPLOYEE:
+            if item.employee_id != viewer.user_id:
+                continue
             entry["first_name"] = item.full_name.split()[0]
-            if item.employee_id == viewer.user_id and item.note:
+            if item.note:
                 entry["note"] = item.note
         else:
             entry["full_name"] = item.full_name
@@ -216,6 +218,12 @@ def recommendation_findings(sources):
             )
         else:
             findings.append("Evaluation without semantic context. Profile matching was unavailable.")
+    constraint_notes = by_name.get("constraint_notes")
+    if constraint_notes:
+        for item in constraint_notes.get("notes") or []:
+            text = item.get("note") or ""
+            if text:
+                findings.append("Constraint note: {0}".format(text))
     history = by_name.get("approved_history")
     if history:
         findings.append(

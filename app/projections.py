@@ -10,6 +10,7 @@ from app.event_store import (
     ASSIGNMENT_REJECTED,
     ASSIGNMENT_REQUESTED,
     AVAILABILITY_CONSTRAINT_SUBMITTED,
+    AVAILABILITY_CONSTRAINT_WITHDRAWN,
     SHIFT_CANCELLED,
     SHIFT_DEFINED,
     SWAP_APPROVED,
@@ -54,6 +55,8 @@ def _create_read_model_tables():
     RequestRecommendationRow.__table__.create(db.engine, checkfirst=True)
     _ensure_sources_json()
     AvailabilityConstraintRow.__table__.create(db.engine, checkfirst=True)
+    _ensure_constraint_schedule()
+    _ensure_optional_constraint_dates()
     EmployeeHoursRow.__table__.create(db.engine, checkfirst=True)
     ApprovedAssignmentRow.__table__.create(db.engine, checkfirst=True)
     RequestRecommendationRow.__table__.create(db.engine, checkfirst=True)
@@ -101,6 +104,8 @@ def project_shift_board():
             _apply_colleague(event, STATUS_REJECTED)
         elif event.event_type == AVAILABILITY_CONSTRAINT_SUBMITTED:
             _apply_availability(event)
+        elif event.event_type == AVAILABILITY_CONSTRAINT_WITHDRAWN:
+            _apply_availability_withdrawn(event)
         elif event.event_type == ASSIGNMENT_APPROVED:
             _apply_assignment_approved(event)
         elif event.event_type == ASSIGNMENT_REJECTED:
@@ -171,16 +176,33 @@ def _apply_request(event, request_type):
 
 def _apply_availability(event):
     payload = json.loads(event.payload_json)
-    db.session.add(
-        AvailabilityConstraintRow(
-            constraint_id=event.aggregate_id,
-            employee_id=payload["employee_id"],
-            start_date=date.fromisoformat(payload["start_date"]),
-            end_date=date.fromisoformat(payload["end_date"]),
-            constraint_type=payload["constraint_type"],
-            note=payload.get("note") or "",
-        )
-    )
+    row = db.session.get(AvailabilityConstraintRow, event.aggregate_id)
+    if row is None:
+        row = AvailabilityConstraintRow(constraint_id=event.aggregate_id)
+        db.session.add(row)
+    row.employee_id = payload["employee_id"]
+    row.start_date = _optional_date(payload.get("start_date"))
+    row.end_date = _optional_date(payload.get("end_date"))
+    row.constraint_type = payload["constraint_type"]
+    row.note = payload.get("note") or ""
+    row.weekdays = payload.get("weekdays") or ""
+    row.time_start = payload.get("time_start") or ""
+    row.time_end = payload.get("time_end") or ""
+    row.nights = bool(payload.get("nights"))
+    row.shabbat_eves = bool(payload.get("shabbat_eves"))
+    row.holidays = bool(payload.get("holidays"))
+
+
+def _apply_availability_withdrawn(event):
+    row = db.session.get(AvailabilityConstraintRow, event.aggregate_id)
+    if row is not None:
+        db.session.delete(row)
+
+
+def _optional_date(value):
+    if not value:
+        return None
+    return date.fromisoformat(value)
 
 
 def _apply_assignment_approved(event):
@@ -350,6 +372,62 @@ def _ensure_column(table_name, column_name, sqlite_sql, sqlserver_sql):
     statement = sqlite_sql if db.engine.dialect.name == "sqlite" else sqlserver_sql
     db.session.execute(text(statement))
     db.session.commit()
+
+
+def _ensure_optional_constraint_dates():
+    if db.engine.dialect.name == "sqlite":
+        return
+    columns = {column["name"]: column for column in inspect(db.engine).get_columns("read_availability_constraints")}
+    for name in ("start_date", "end_date"):
+        if columns[name].get("nullable"):
+            continue
+        db.session.execute(
+            text("ALTER TABLE read_availability_constraints ALTER COLUMN {0} DATE NULL".format(name))
+        )
+        db.session.commit()
+
+
+def _ensure_constraint_schedule():
+    columns = (
+        (
+            "weekdays",
+            "ALTER TABLE read_availability_constraints ADD COLUMN weekdays VARCHAR(40) NOT NULL DEFAULT ''",
+            "ALTER TABLE read_availability_constraints ADD weekdays VARCHAR(40) NOT NULL "
+            "CONSTRAINT DF_read_availability_constraints_weekdays DEFAULT ''",
+        ),
+        (
+            "time_start",
+            "ALTER TABLE read_availability_constraints ADD COLUMN time_start VARCHAR(5) NOT NULL DEFAULT ''",
+            "ALTER TABLE read_availability_constraints ADD time_start VARCHAR(5) NOT NULL "
+            "CONSTRAINT DF_read_availability_constraints_time_start DEFAULT ''",
+        ),
+        (
+            "time_end",
+            "ALTER TABLE read_availability_constraints ADD COLUMN time_end VARCHAR(5) NOT NULL DEFAULT ''",
+            "ALTER TABLE read_availability_constraints ADD time_end VARCHAR(5) NOT NULL "
+            "CONSTRAINT DF_read_availability_constraints_time_end DEFAULT ''",
+        ),
+        (
+            "nights",
+            "ALTER TABLE read_availability_constraints ADD COLUMN nights BOOLEAN NOT NULL DEFAULT 0",
+            "ALTER TABLE read_availability_constraints ADD nights BIT NOT NULL "
+            "CONSTRAINT DF_read_availability_constraints_nights DEFAULT 0",
+        ),
+        (
+            "shabbat_eves",
+            "ALTER TABLE read_availability_constraints ADD COLUMN shabbat_eves BOOLEAN NOT NULL DEFAULT 0",
+            "ALTER TABLE read_availability_constraints ADD shabbat_eves BIT NOT NULL "
+            "CONSTRAINT DF_read_availability_constraints_shabbat_eves DEFAULT 0",
+        ),
+        (
+            "holidays",
+            "ALTER TABLE read_availability_constraints ADD COLUMN holidays BOOLEAN NOT NULL DEFAULT 0",
+            "ALTER TABLE read_availability_constraints ADD holidays BIT NOT NULL "
+            "CONSTRAINT DF_read_availability_constraints_holidays DEFAULT 0",
+        ),
+    )
+    for name, sqlite_sql, sqlserver_sql in columns:
+        _ensure_column("read_availability_constraints", name, sqlite_sql, sqlserver_sql)
 
 
 def _ensure_decision_note():

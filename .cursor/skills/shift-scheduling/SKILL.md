@@ -25,9 +25,11 @@ Employee commands use `employee_id` from the session.
 
 | Type | Effect |
 |---|---|
-| `unavailable` | Hard block. Recommendation is `reject`. |
-| `prefer not` | Soft signal. Recommendation is `warning` when nothing harder applies. |
+| `unavailable` | Hard block when a manager assigns the employee. Recommendation is `reject`. An employee who requests the shift is warned and may confirm to proceed. |
+| `prefer not` | Soft signal. Recommendation is `warning` when nothing harder applies. An employee must confirm before a conflicting request is stored. |
 | `prefer` | Stored preference. No block and no warning. |
+
+An employee self-request that matches their constraints asks: "This conflicts with your constraints. Do you still want to proceed?" Confirmation stores the request and the recommendation is `warning`. Overlap, rest under 8 hours, and role mismatch still reject.
 
 Also reject on overlap, rest under 8 hours, or a role mismatch. Warn, and still send the request to the manager, when projected weekly hours exceed 42.
 

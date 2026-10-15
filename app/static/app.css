@@ -177,12 +177,44 @@ a.button-link {
   font-weight: 700;
 }
 
+a.button-link.secondary {
+  margin-top: 0;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.row-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; white-space: nowrap; }
+.row-actions form, .row-actions button, .row-actions .button-link { margin-top: 0; }
+
 .filters a.button-link, .actions { margin-top: 0; }
 .actions { margin: 0 0 1rem; }
 .sign-out button { margin-top: 0; background: #fff; color: var(--danger); border: 1px solid #e7c8c4; }
 
 .check { display: flex; align-items: center; gap: 0.45rem; font-weight: 650; }
 .check input { width: auto; margin: 0; }
+
+.choice-group {
+  margin: 1rem 0 0;
+  padding: 0.15rem 0.9rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.choice-group legend {
+  padding: 0 0.35rem;
+  font-weight: 750;
+}
+
+.choice-group .hint { margin: 0.35rem 0 0; }
+
+.weekday-row, .flag-row { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; }
+
+.weekday-row .check, .flag-row .check { margin-top: 0.45rem; }
+
+.time-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
+
+.time-row label { margin-top: 0.55rem; }
 
 .filters {
   display: grid;

@@ -135,6 +135,107 @@ class AgentEvaluationTests(unittest.TestCase):
         self.assertEqual(missing["decision"], "approve")
         self.assertIn("Holiday data was unavailable.", missing["rationale"])
 
+    def test_an_employee_confirms_before_overriding_a_constraint(self):
+        from app.commands.define_shift import CommandRejected
+        from app.commands.submit_requests import CONSTRAINT_CONFLICT_PROMPT, request_assignment
+
+        self._unavailable(self.employee_id, "2026-10-19")
+        self._login("ayala@example.com")
+        prompted = self.client.post("/shifts/" + self.shift_id + "/request", data={"note": "I can cover"})
+        page = prompted.get_data(as_text=True)
+        self.assertEqual(prompted.status_code, 400)
+        self.assertIn(CONSTRAINT_CONFLICT_PROMPT, page)
+        self.assertIn("Proceed", page)
+        self.assertIn("I can cover", page)
+        with self.app.app_context():
+            with self.assertRaises(CommandRejected) as caught:
+                request_assignment(
+                    actor_id=self.employee_id,
+                    actor_role="employee",
+                    shift_id=self.shift_id,
+                )
+            self.assertEqual(str(caught.exception), CONSTRAINT_CONFLICT_PROMPT)
+            self.assertFalse(self._has(ASSIGNMENT_REQUESTED))
+            stored = request_assignment(
+                actor_id=self.employee_id,
+                actor_role="employee",
+                shift_id=self.shift_id,
+                confirm_constraints=True,
+            )
+            import json
+
+            self.assertTrue(json.loads(stored.payload_json)["constraint_override"])
+
+    def test_a_self_request_warns_for_an_unavailable_constraint(self):
+        from app.commands.decide_request import decide_request
+        from app.commands.define_shift import CommandRejected
+        from app.commands.submit_requests import register_employee
+
+        self._unavailable(self.employee_id, "2026-10-19")
+        self._request(self.employee_id, "cashier")
+        self._cycle()
+        payload = self._payload(self._recommendation())
+        self.assertEqual(payload["decision"], "warning")
+        self.assertIn("conflicts with the employee's constraints", payload["rationale"])
+        with self.app.app_context():
+            request_id = (
+                db.session.query(Event.aggregate_id)
+                .filter(Event.event_type == ASSIGNMENT_REQUESTED)
+                .scalar()
+            )
+            decide_request(
+                actor_id="manager-1",
+                actor_role="manager",
+                request_id=request_id,
+                action="approve",
+            )
+            later = define_shift(
+                actor_id="manager-1",
+                actor_role="manager",
+                shift_date="2026-10-20",
+                start_time="09:00",
+                end_time="17:00",
+                required_role="cashier",
+                required_headcount=1,
+                today=date(2026, 10, 12),
+            )
+            later_id = later.aggregate_id
+            project_shift_board()
+            self._unavailable(self.employee_id, "2026-10-20")
+            with self.assertRaises(CommandRejected) as caught:
+                register_employee(
+                    actor_id="manager-1",
+                    actor_role="manager",
+                    shift_id=later_id,
+                    employee_id=self.employee_id,
+                )
+        self.assertIn("unavailable", str(caught.exception).lower())
+
+    def test_a_manager_placed_request_rejects_unavailable(self):
+        from app.commands.decide_request import CommandRejected, decide_request
+
+        self._unavailable(self.employee_id, "2026-10-21")
+        self._request(self.employee_id, "cashier", shift_date="2026-10-21", actor_id="manager-1")
+        self._cycle()
+        payload = self._payload(self._recommendation())
+        self.assertEqual(payload["decision"], "reject")
+        self.assertIn("unavailable", payload["rationale"].lower())
+        with self.app.app_context():
+            request_id = (
+                db.session.query(Event)
+                .filter(Event.event_type == ASSIGNMENT_REQUESTED)
+                .one()
+                .aggregate_id
+            )
+            with self.assertRaises(CommandRejected) as caught:
+                decide_request(
+                    actor_id="manager-1",
+                    actor_role="manager",
+                    request_id=request_id,
+                    action="approve",
+                )
+        self.assertIn("unavailable", str(caught.exception).lower())
+
     def test_a_failed_hours_tool_still_reaches_the_manager(self):
         self._request(self.employee_id, "cashier")
         evaluated = self._cycle(weekly_hours=lambda *args, **kwargs: error("invalid_hours"))
@@ -152,7 +253,24 @@ class AgentEvaluationTests(unittest.TestCase):
         options.update(kwargs)
         return run_evaluation_cycle(self.app, **options)
 
-    def _request(self, employee_id, role, shift_date="2026-10-19", start="09:00", end="17:00"):
+    def _unavailable(self, employee_id, shift_date):
+        with self.app.app_context():
+            append_event(
+                aggregate_type="EmployeeAvailability",
+                aggregate_id="constraint-" + employee_id + "-" + shift_date,
+                event_type="AvailabilityConstraintSubmitted",
+                payload={
+                    "employee_id": employee_id,
+                    "start_date": shift_date,
+                    "end_date": shift_date,
+                    "constraint_type": "unavailable",
+                    "note": "",
+                },
+                actor_id=employee_id,
+            )
+            project_shift_board()
+
+    def _request(self, employee_id, role, shift_date="2026-10-19", start="09:00", end="17:00", actor_id=None):
         with self.app.app_context():
             if shift_date != "2026-10-19" or start != "09:00":
                 shift = define_shift(
@@ -181,7 +299,7 @@ class AgentEvaluationTests(unittest.TestCase):
                     "note": "",
                     "status": "Waiting for agent evaluation",
                 },
-                actor_id=employee_id,
+                actor_id=actor_id or employee_id,
             )
 
     def _approve_existing(self, start, end):

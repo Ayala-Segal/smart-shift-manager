@@ -118,9 +118,9 @@ class UserFlowTests(unittest.TestCase):
         own = next(item for item in registered if item["status"] == "Waiting for agent evaluation" and "note" in item)
         self.assertEqual(own["request_id"], request_id)
         self.assertNotIn("full_name", own)
-        other = next(item for item in registered if item.get("request_id") != request_id and item["request_type"] == "assignment")
-        self.assertNotIn("note", other)
-        self.assertEqual(other["first_name"], "Yael")
+        self.assertNotIn("Yael", detail.get_data(as_text=True))
+        self.assertEqual(len(registered), 1)
+        self.assertEqual(detail.get_json()["shift"]["waiting_candidates"], 2)
 
         self.client.post("/auth/logout")
         self._login("noa@example.com")
