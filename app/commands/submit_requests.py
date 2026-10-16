@@ -21,7 +21,12 @@ from app.event_store import (
     append_event,
 )
 from app.extensions import db
-from app.tools.conflicts import CONSTRAINT_REASON_PREFIXES, check_availability_conflicts
+from app.tools.conflicts import (
+    CONSTRAINT_REASON_PREFIXES,
+    NOTE_LIMITS,
+    check_availability_conflicts,
+    shift_matches_label,
+)
 from app.tools.schedule import parse_minutes
 
 ISRAEL = ZoneInfo("Asia/Jerusalem")
@@ -336,6 +341,9 @@ def _has_constraint_conflict(employee_id, shift):
 
 
 def _reject_time_off(employee_id, shift):
+    from app.agent.cycle import apply_constraint_notes
+    from app.agent.ollama import classify_constraint_note
+
     block = check_availability_conflicts(
         employee_id,
         shift["shift_date"],
@@ -344,9 +352,34 @@ def _reject_time_off(employee_id, shift):
     )
     if not block.get("ok"):
         raise CommandRejected("The availability check is unavailable.")
+    apply_constraint_notes(
+        block,
+        shift_date=shift["shift_date"],
+        start_time=shift["start_time"],
+        end_time=shift["end_time"],
+        holiday=False,
+        classify=classify_constraint_note,
+    )
     for reason in block["result"]["reasons"]:
         if reason.startswith("The employee is unavailable"):
             raise CommandRejected(reason)
+    noted = {
+        "nights": "The employee note limits night shifts.",
+        "shabbat_eve": "The employee note limits Shabbat eves.",
+        "holiday": "The employee note limits holidays.",
+    }
+    for item in block["result"].get("constraint_notes") or []:
+        label = item.get("label")
+        if item.get("constraint_type") != "unavailable" or label not in NOTE_LIMITS:
+            continue
+        if shift_matches_label(
+            label,
+            shift["shift_date"],
+            shift["start_time"],
+            shift["end_time"],
+            False,
+        ):
+            raise CommandRejected(noted[label])
 
 
 def _owned_constraint(constraint_id, actor_id):

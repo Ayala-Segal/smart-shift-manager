@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from app.agent.ollama import rewrite_rationale
+from app.agent.ollama import classify_constraint_note, rewrite_rationale
 
 
 class OllamaRationaleTests(unittest.TestCase):
@@ -123,6 +123,32 @@ class OllamaRationaleTests(unittest.TestCase):
         self.assertEqual(calls, [1, 1])
         self.assertEqual(text, fallback)
         self.assertFalse(used)
+
+
+class ConstraintNoteClassificationTests(unittest.TestCase):
+    def test_a_sentence_that_names_nights_is_nights(self):
+        label = classify_constraint_note(
+            "I'm afraid to work at night",
+            generate=lambda note: "The employee does not want nights.",
+        )
+        self.assertEqual(label, "nights")
+
+    def test_an_explicit_personal_reply_stays_personal(self):
+        label = classify_constraint_note("a wedding", generate=lambda note: "personal")
+        self.assertEqual(label, "personal")
+
+    def test_a_personal_reply_still_keeps_an_explicit_night_note(self):
+        label = classify_constraint_note(
+            "I'm afraid to work at night because there are no buses",
+            generate=lambda note: "personal",
+        )
+        self.assertEqual(label, "nights")
+
+    def test_two_failed_attempts_stay_personal(self):
+        def fail(note):
+            raise TimeoutError("ollama is down")
+
+        self.assertEqual(classify_constraint_note("night work", generate=fail), "personal")
 
 
 def _fallback():

@@ -291,7 +291,7 @@ def _passages(app, retrieve, employee_id, shift):
 def _retrieve(store_path, employee_id, query):
     from app.retrieval.service import passages_for_employee
 
-    return passages_for_employee(store_path, employee_id, query)
+    return passages_for_employee(store_path, employee_id, query) #retrieval of the shift history
 
 
 def _recent_assignments(employee_id, shift_date):
@@ -322,7 +322,7 @@ def _sources(conflict, hours, tavily, retrieval_ok, passage_count, history):
     else:
         tavily_body["error_code"] = tavily.get("error_code")
     figures = hours["result"]
-    return [
+    sources = [
         {
             "name": "check_availability_conflicts",
             "ok": True,
@@ -362,7 +362,7 @@ def apply_constraint_notes(conflict, *, shift_date, start_time, end_time, holida
         if not note:
             continue
         try:
-            label = classify(note)
+            label = classify(note) #AI generated label for the note
         except Exception:
             label = "personal"
         if label not in reasons:

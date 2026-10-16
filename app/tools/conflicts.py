@@ -119,6 +119,8 @@ def shift_matches_label(label, shift_date, start_time, end_time, holiday):
 
 
 def _schedule_matches(constraint, day, start_time, end_time, holiday):
+    if _note_without_schedule(constraint):
+        return False
     weekdays = [item for item in (constraint.weekdays or "").split(",") if item]
     if weekdays and WEEKDAYS[day.weekday()] not in weekdays:
         return False
@@ -134,6 +136,16 @@ def _schedule_matches(constraint, day, start_time, end_time, holiday):
     if constraint.holidays and not holiday:
         return False
     return True
+
+
+def _note_without_schedule(constraint):
+    """A note with no schedule is interpreted later. It does not cover every hour."""
+    if not (getattr(constraint, "note", None) or "").strip():
+        return False
+    weekdays = [item for item in (constraint.weekdays or "").split(",") if item]
+    if weekdays or constraint.nights or constraint.shabbat_eves or constraint.holidays:
+        return False
+    return not ((constraint.time_start or "") and (constraint.time_end or ""))
 
 
 def _overlaps_clock_window(day, start_time, end_time, window_start, window_end):

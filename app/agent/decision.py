@@ -1,7 +1,7 @@
 MAX_RATIONALE = 500
 SEMANTIC_WARNING = "Evaluation without semantic context"
 
-
+# decision making based on the tool results
 def decide(*, role_matches, conflict, hours, tavily, retrieval_ok, shift_hours):
     """Choose approve, warning, or reject from tool results.
 
@@ -34,7 +34,7 @@ def decide(*, role_matches, conflict, hours, tavily, retrieval_ok, shift_hours):
         "hours_warning": exceeds,
     }
 
-
+# message to the user about the decision
 def _rationale(decision, *, role_matches, conflict, hours, tavily, retrieval_ok, shift_hours, holiday):
     sentences = []
     if decision == "reject":

@@ -183,7 +183,12 @@ def recommendation_findings(sources):
             reasons = "; ".join(availability.get("reasons") or []) or "a hard constraint"
             findings.append("Availability blocks this request: {0}.".format(reasons))
         elif availability.get("soft_block"):
-            findings.append("The employee prefers not to work this date. That is a warning, not a block.")
+            reasons = availability.get("reasons") or []
+            note_reasons = [item for item in reasons if str(item).startswith("The employee note")]
+            if note_reasons:
+                findings.append("{0} That is a warning, not a block.".format(" ".join(note_reasons)))
+            else:
+                findings.append("The employee prefers not to work this date. That is a warning, not a block.")
         else:
             findings.append("No availability conflict was found.")
     hours = by_name.get("calculate_weekly_hours")

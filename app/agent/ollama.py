@@ -13,6 +13,10 @@ from app.agent.decision import MAX_RATIONALE
 DEFAULT_BASE_URL = "http://127.0.0.1:11434"
 DEFAULT_MODEL = "llama3.2"
 NOTE_LABELS = ("nights", "shabbat_eve", "holiday", "personal")
+_LABEL_WORD = re.compile(r"\b(nights|shabbat_eve|holiday|personal)\b")
+_NIGHT_WORDS = re.compile(r"\b(?:nights?|overnight)\b|ליל", re.IGNORECASE)
+_SHABBAT_WORDS = re.compile(r"\bshabbat\b|שבת", re.IGNORECASE)
+_HOLIDAY_WORDS = re.compile(r"\bholidays?\b|חג", re.IGNORECASE)
 _HOUR_KEYS = ("approved_hours", "projected_hours", "shift_hours", "weekly_limit")
 _NEGATED_EXCEED = re.compile(
     r"\b(?:does not|do not|did not|will not|would not|cannot|can't|won't|don't|doesn't|didn't|not|never)\s+exceed\w*",
@@ -73,15 +77,34 @@ def classify_constraint_note(note, *, generate=None):
     if generate is None and _tests_are_running():
         return "personal"
     generator = generate or _classify
-    try:
-        raw = generator(text)
-    except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
-        return "personal"
-    word = str(raw or "").strip().lower().split()
-    label = word[0].strip(".,:;") if word else ""
-    if label in NOTE_LABELS:
-        return label
+    for _attempt in range(2):
+        try:
+            raw = generator(text)
+        except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
+            continue
+        label = _label_from_reply(raw)
+        if label != "personal":
+            return label
+        if _LABEL_WORD.search(str(raw or "").lower()):
+            return _explicit_limit(text) or "personal"
     return "personal"
+
+
+def _label_from_reply(raw):
+    """Use a label word anywhere in the reply. A sentence is still a label."""
+    found = _LABEL_WORD.findall(str(raw or "").lower())
+    return found[0] if found else "personal"
+
+
+def _explicit_limit(text):
+    """An explicit night, Shabbat, or holiday word wins over a personal label."""
+    if _NIGHT_WORDS.search(text):
+        return "nights"
+    if _SHABBAT_WORDS.search(text):
+        return "shabbat_eve"
+    if _HOLIDAY_WORDS.search(text):
+        return "holiday"
+    return ""
 
 
 def rationale_facts(*, decision, role_matches, conflict, hours, tavily, shift_hours, fallback):
@@ -123,7 +146,8 @@ def _classify(note):
         "nights means they do not want night work. "
         "shabbat_eve means Friday evening or the eve of Shabbat. "
         "holiday means a holiday or festival. "
-        "personal means any other reason, including a wedding or family event.\n\n"
+        "personal means any other reason, including a wedding or family event. "
+        "Answer nights when the note mentions night work, even if the reason is buses or transport.\n\n"
         "Note:\n{0}"
     ).format(note)
     body = json.dumps({"model": model, "prompt": prompt, "stream": False}).encode("utf-8")
