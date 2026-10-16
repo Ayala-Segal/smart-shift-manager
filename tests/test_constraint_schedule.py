@@ -109,6 +109,134 @@ class ConstraintScheduleTests(unittest.TestCase):
         self.assertEqual(day_choice["decision"], "approve")
         self.assertEqual(night_choice["decision"], "reject")
 
+    def test_a_night_note_without_a_checkbox_limits_only_night_shifts(self):
+        with self.app.app_context():
+            self._store("employee-buses", "prefer not", note="I'm afraid to work at night")
+            night = check_availability_conflicts("employee-buses", "2026-10-19", "22:00", "06:00")
+            day = check_availability_conflicts("employee-buses", "2026-10-19", "09:00", "17:00")
+            for conflict, start, end in (
+                (night, "22:00", "06:00"),
+                (day, "09:00", "17:00"),
+            ):
+                apply_constraint_notes(
+                    conflict,
+                    shift_date="2026-10-19",
+                    start_time=start,
+                    end_time=end,
+                    holiday=False,
+                    classify=lambda note: "nights",
+                )
+            night_choice = decide(**self._decision_input(night))
+            day_choice = decide(**self._decision_input(day))
+        self.assertEqual(night_choice["decision"], "warning")
+        self.assertIn("night", night_choice["rationale"])
+        self.assertFalse(day["result"]["soft_block"])
+        self.assertEqual(day_choice["decision"], "approve")
+
+    def test_an_afternoon_shift_does_not_conflict_with_a_night_note(self):
+        from unittest.mock import patch
+
+        from app.commands.submit_requests import _has_constraint_conflict
+
+        with self.app.app_context():
+            append_event(
+                aggregate_type="EmployeeAvailability",
+                aggregate_id="constraint-employee-afternoon",
+                event_type="AvailabilityConstraintSubmitted",
+                payload={
+                    "employee_id": "employee-afternoon",
+                    "constraint_type": "prefer not",
+                    "note": "I'm afraid to work at night because sometimes there are no buses afterward",
+                },
+                actor_id="employee-afternoon",
+            )
+            project_shift_board()
+            afternoon = {
+                "shift_date": "2028-10-15",
+                "start_time": "13:03",
+                "end_time": "15:03",
+            }
+            night = {
+                "shift_date": "2028-10-15",
+                "start_time": "22:00",
+                "end_time": "06:00",
+            }
+            with patch("app.agent.ollama.classify_constraint_note", return_value="nights"):
+                self.assertFalse(_has_constraint_conflict("employee-afternoon", afternoon))
+                self.assertTrue(_has_constraint_conflict("employee-afternoon", night))
+
+    def test_prefer_not_without_a_note_still_covers_the_whole_day(self):
+        with self.app.app_context():
+            self._store("employee-blank", "prefer not", note="")
+            day = check_availability_conflicts("employee-blank", "2026-10-19", "09:00", "17:00")
+        self.assertTrue(day["result"]["soft_block"])
+
+    def test_a_manager_cannot_assign_a_night_shift_blocked_only_by_a_note(self):
+        from datetime import date
+        from unittest.mock import patch
+
+        from app.auth.service import register_user
+        from app.commands.define_shift import CommandRejected, define_shift
+        from app.commands.submit_requests import register_employee, submit_availability
+
+        with self.app.app_context():
+            employee = register_user(
+                "Noa Night",
+                "noa.night@example.com",
+                "password1",
+                "employee",
+                "cashier",
+            )
+            employee_id = employee.user_id
+            submit_availability(
+                actor_id=employee_id,
+                actor_role="employee",
+                constraint_type="unavailable",
+                note="I cannot work at night",
+                shift_date="2026-10-19",
+            )
+            project_shift_board()
+            night = define_shift(
+                actor_id="manager-1",
+                actor_role="manager",
+                shift_date="2026-10-19",
+                start_time="22:00",
+                end_time="06:00",
+                required_role="cashier",
+                required_headcount=1,
+                crosses_midnight=True,
+                today=date(2026, 10, 12),
+            )
+            day = define_shift(
+                actor_id="manager-1",
+                actor_role="manager",
+                shift_date="2026-10-19",
+                start_time="09:00",
+                end_time="17:00",
+                required_role="cashier",
+                required_headcount=1,
+                today=date(2026, 10, 12),
+            )
+            night_id = night.aggregate_id
+            day_id = day.aggregate_id
+            project_shift_board()
+            with patch("app.agent.ollama.classify_constraint_note", return_value="nights"):
+                with self.assertRaises(CommandRejected) as caught:
+                    register_employee(
+                        actor_id="manager-1",
+                        actor_role="manager",
+                        shift_id=night_id,
+                        employee_id=employee_id,
+                    )
+                register_employee(
+                    actor_id="manager-1",
+                    actor_role="manager",
+                    shift_id=day_id,
+                    employee_id=employee_id,
+                    today=date(2026, 10, 12),
+                )
+        self.assertIn("night", str(caught.exception).lower())
+
     def _store(self, employee_id, constraint_type, note="", nights=False):
         append_event(
             aggregate_type="EmployeeAvailability",

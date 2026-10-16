@@ -211,6 +211,42 @@ class AgentEvaluationTests(unittest.TestCase):
                 )
         self.assertIn("unavailable", str(caught.exception).lower())
 
+    def test_a_manager_request_warns_when_a_night_note_matches_the_shift(self):
+        from app.queries.board import recommendation_findings
+
+        with self.app.app_context():
+            append_event(
+                aggregate_type="EmployeeAvailability",
+                aggregate_id="constraint-night-note",
+                event_type="AvailabilityConstraintSubmitted",
+                payload={
+                    "employee_id": self.employee_id,
+                    "constraint_type": "prefer not",
+                    "note": "I'm afraid to work at night because there are no buses",
+                },
+                actor_id=self.employee_id,
+            )
+            project_shift_board()
+        self._request(
+            self.employee_id,
+            "cashier",
+            shift_date="2026-11-01",
+            start="22:00",
+            end="23:00",
+            actor_id="manager-1",
+        )
+        self._cycle(classify=lambda note: "nights")
+        payload = self._payload(self._recommendation())
+        self.assertEqual(payload["decision"], "warning")
+        self.assertIn("night", payload["rationale"].lower())
+        availability = next(item for item in payload["sources"] if item["name"] == "check_availability_conflicts")
+        self.assertTrue(availability["soft_block"])
+        notes = next(item for item in payload["sources"] if item["name"] == "constraint_notes")
+        self.assertIn("buses", notes["notes"][0]["note"])
+        findings = recommendation_findings(payload["sources"])
+        self.assertTrue(any("night" in item.lower() for item in findings))
+        self.assertTrue(any("buses" in item for item in findings))
+
     def test_a_manager_placed_request_rejects_unavailable(self):
         from app.commands.decide_request import CommandRejected, decide_request
 

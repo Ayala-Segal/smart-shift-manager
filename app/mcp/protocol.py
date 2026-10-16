@@ -6,7 +6,9 @@ SERVER_NAME = "smart-shift-tools"
 
 
 def handle_message(message, app):
+    """Answer one MCP message for the in-app shift tools."""
     method = message.get("method")
+    # A notification needs no reply.
     if method and str(method).startswith("notifications/"):
         return None
     request_id = message.get("id")
@@ -34,6 +36,7 @@ def handle_message(message, app):
 
 
 def _call_tool(app, name, arguments):
+    """Run one shift tool and wrap its result as MCP text."""
     from app.tools.conflicts import check_availability_conflicts
     from app.tools.hours import calculate_weekly_hours
 
@@ -52,6 +55,7 @@ def _call_tool(app, name, arguments):
                 arguments.get("end_time"),
             )
         else:
+            # The caller asked for a tool this server does not have.
             envelope = {"ok": False, "error_code": "unknown_tool"}
     return {
         "content": [{"type": "text", "text": json.dumps(envelope)}],
@@ -60,6 +64,7 @@ def _call_tool(app, name, arguments):
 
 
 def _tool_definitions():
+    """Describe the two shift tools and the inputs they need."""
     return [
         {
             "name": "calculate_weekly_hours",
@@ -92,7 +97,7 @@ def _tool_definitions():
 
 
 def dispatch_external(message, server_name, definitions, caller):
-    """MCP handler for a server that is not the in-app shift-tool server."""
+    """Answer one MCP message for an outside server, such as holiday search."""
     method = message.get("method")
     if method and str(method).startswith("notifications/"):
         return None
@@ -128,4 +133,5 @@ def dispatch_external(message, server_name, definitions, caller):
 
 
 def _result(request_id, result):
+    """Build a successful JSON-RPC reply."""
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
